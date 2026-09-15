@@ -56,6 +56,8 @@ jobs:
         run: bash scripts/test-macos.sh
       - name: Test installer migration in isolated fixtures
         run: bash scripts/test-installer-migration.sh
+      - name: Test DMG drag-to-Applications layout without GUI automation
+        run: bash scripts/test-dmg-layout.sh
       - name: Strict release compile
         run: swift build -c release -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
       - name: Build and verify ad-hoc development app (no launch or install)
@@ -68,6 +70,7 @@ jobs:
           path: |
             .build/macos-regression-*/
             .build/onepaw-migration-tests.*/
+            .build/onepaw-dmg-layout-tests.*/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

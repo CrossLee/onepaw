@@ -4,10 +4,17 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_BUNDLE_NAME="一爪"
-ASSET_PREFIX="一爪"
+ASSET_PREFIX="OnePaw"
 EXECUTABLE_NAME="CrossToolApp"
 INFO_PLIST="$PROJECT_DIR/Resources/Info.plist"
 ICON_SOURCE="$PROJECT_DIR/Resources/AppIcon.icns"
+DMG_BACKGROUND_SOURCE="$PROJECT_DIR/Resources/Installer/DMGBackground.png"
+DMG_LAYOUT_SCRIPT="$PROJECT_DIR/scripts/dmg-layout.py"
+DMG_LAYOUT_VENDOR_DIR="$PROJECT_DIR/scripts/vendor"
+DMG_DS_STORE_WHEEL="$DMG_LAYOUT_VENDOR_DIR/ds_store-1.3.1-py3-none-any.whl"
+DMG_MAC_ALIAS_WHEEL="$DMG_LAYOUT_VENDOR_DIR/mac_alias-2.2.2-py3-none-any.whl"
+DMG_DS_STORE_WHEEL_SHA256="fbacbb0bd5193ab3e66e5a47fff63619f15e374ffbec8ae29744251a6c8f05b5"
+DMG_MAC_ALIAS_WHEEL_SHA256="504ab8ac546f35bbd75ad014d6ad977c426660aa721f2cd3acf3dc2f664141bd"
 INSTALLER_SCRIPTS_DIR="$PROJECT_DIR/scripts/installer"
 source "$PROJECT_DIR/scripts/verify-app-brand.sh"
 TEAM_ID="8LSY655LKD"
@@ -22,7 +29,7 @@ Usage: ./scripts/build-release.sh [--skip-notarization]
 
 Builds Developer ID signed release artifacts:
   - a ZIP containing the notarized and stapled 一爪.app
-  - a notarized and stapled 一爪-*.dmg for drag-to-Applications install
+  - a notarized and stapled OnePaw-*.dmg for drag-to-Applications install
   - a notarized and stapled 一爪-*.pkg installer (recommended for old-name upgrades)
   - SHA256SUMS.txt
 
@@ -97,6 +104,18 @@ done
 
 [[ -f "$INFO_PLIST" ]] || die "missing Info.plist: $INFO_PLIST"
 [[ -f "$ICON_SOURCE" ]] || die "missing app icon: $ICON_SOURCE"
+[[ -f "$DMG_BACKGROUND_SOURCE" && ! -L "$DMG_BACKGROUND_SOURCE" ]] \
+    || die "missing or symlinked DMG background: $DMG_BACKGROUND_SOURCE"
+[[ -f "$DMG_LAYOUT_SCRIPT" && ! -L "$DMG_LAYOUT_SCRIPT" ]] \
+    || die "missing or symlinked DMG layout script: $DMG_LAYOUT_SCRIPT"
+[[ -f "$DMG_DS_STORE_WHEEL" && ! -L "$DMG_DS_STORE_WHEEL" ]] \
+    || die "missing or symlinked vendored ds_store wheel: $DMG_DS_STORE_WHEEL"
+[[ -f "$DMG_MAC_ALIAS_WHEEL" && ! -L "$DMG_MAC_ALIAS_WHEEL" ]] \
+    || die "missing or symlinked vendored mac_alias wheel: $DMG_MAC_ALIAS_WHEEL"
+[[ "$(shasum -a 256 "$DMG_DS_STORE_WHEEL" | awk '{ print $1 }')" == "$DMG_DS_STORE_WHEEL_SHA256" ]] \
+    || die "vendored ds_store wheel checksum changed"
+[[ "$(shasum -a 256 "$DMG_MAC_ALIAS_WHEEL" | awk '{ print $1 }')" == "$DMG_MAC_ALIAS_WHEEL_SHA256" ]] \
+    || die "vendored mac_alias wheel checksum changed"
 [[ -x "$INSTALLER_SCRIPTS_DIR/preinstall" ]] || die "missing executable installer preinstall script"
 [[ -x "$INSTALLER_SCRIPTS_DIR/postinstall" ]] || die "missing executable installer postinstall script"
 [[ -f "$INSTALLER_SCRIPTS_DIR/migration-common.sh" ]] || die "missing installer migration helper"
@@ -116,6 +135,18 @@ BACKGROUND_ONLY="$(plutil -extract LSBackgroundOnly raw -expect bool -o - "$INFO
 [[ "$AGENT_APP" == "true" ]] || die "Info.plist must declare LSUIElement=true as a Boolean"
 [[ "$BACKGROUND_ONLY" != "true" ]] || die "Info.plist must not declare LSBackgroundOnly=true"
 verify_image_document_registration "$INFO_PLIST" "source Info.plist"
+
+DMG_BACKGROUND_WIDTH="$(sips -g pixelWidth "$DMG_BACKGROUND_SOURCE" 2>/dev/null | awk '/pixelWidth:/ { print $2 }')"
+DMG_BACKGROUND_HEIGHT="$(sips -g pixelHeight "$DMG_BACKGROUND_SOURCE" 2>/dev/null | awk '/pixelHeight:/ { print $2 }')"
+DMG_BACKGROUND_DPI_WIDTH="$(sips -g dpiWidth "$DMG_BACKGROUND_SOURCE" 2>/dev/null | awk '/dpiWidth:/ { print $2 }')"
+DMG_BACKGROUND_DPI_HEIGHT="$(sips -g dpiHeight "$DMG_BACKGROUND_SOURCE" 2>/dev/null | awk '/dpiHeight:/ { print $2 }')"
+[[ "$DMG_BACKGROUND_WIDTH" == "1586" && "$DMG_BACKGROUND_HEIGHT" == "992" ]] \
+    || die "DMG background must be the approved 1586x992 Retina artwork"
+[[ "$DMG_BACKGROUND_DPI_WIDTH" == "144.000" && "$DMG_BACKGROUND_DPI_HEIGHT" == "144.000" ]] \
+    || die "DMG background must use 144 dpi so Finder displays it at 793x496 points"
+DMG_LAYOUT_PYTHON="$(xcrun --find python3 2>/dev/null || true)"
+[[ -x "$DMG_LAYOUT_PYTHON" ]] || die "Xcode Python is required to create the Finder DMG layout"
+DMG_LAYOUT_PYTHONPATH="$DMG_DS_STORE_WHEEL:$DMG_MAC_ALIAS_WHEEL"
 PACKAGE_VERSION="$VERSION.$BUILD_NUMBER"
 
 APPLICATION_IDENTITY="${CROSSTOOL_APPLICATION_IDENTITY:-$DEFAULT_APPLICATION_IDENTITY}"
@@ -235,8 +266,9 @@ CHECKSUM_PATH="$RELEASE_DIR/SHA256SUMS$SUFFIX.txt"
 UNSIGNED_PKG="$STAGING_DIR/$APP_BUNDLE_NAME-unsigned.pkg"
 NOTARY_ZIP="$STAGING_DIR/$APP_BUNDLE_NAME-notary-upload.zip"
 DMG_ROOT="$STAGING_DIR/dmg-root"
-DMG_MOUNT_DIR="$STAGING_DIR/dmg-mount"
+DMG_RW_PATH="$STAGING_DIR/$ASSET_PREFIX-$VERSION-layout.dmg"
 DMG_VOLUME_NAME="一爪"
+DMG_MOUNT_DIR="$STAGING_DIR/dmg-mount"
 PKG_ROOT="$STAGING_DIR/pkg-root"
 COMPONENT_PLIST="$STAGING_DIR/components.plist"
 EXPANDED_PKG="$STAGING_DIR/expanded-pkg"
@@ -278,6 +310,8 @@ echo "Creating drag-to-Applications DMG..."
 mkdir -p "$DMG_ROOT" "$DMG_MOUNT_DIR"
 ditto "$APP_BUNDLE" "$DMG_ROOT/$APP_BUNDLE_NAME.app"
 ln -s /Applications "$DMG_ROOT/Applications"
+/bin/mkdir -p "$DMG_ROOT/.background"
+/bin/cp -X "$DMG_BACKGROUND_SOURCE" "$DMG_ROOT/.background/DMGBackground.png"
 hdiutil create \
     -quiet \
     -volname "$DMG_VOLUME_NAME" \
@@ -285,8 +319,48 @@ hdiutil create \
     -nospotlight \
     -srcfolder "$DMG_ROOT" \
     -ov \
+    -format UDRW \
+    "$DMG_RW_PATH"
+
+DMG_MOUNTED=true
+hdiutil attach \
+    -readwrite \
+    -noverify \
+    -noautoopen \
+    -nobrowse \
+    -mountpoint "$DMG_MOUNT_DIR" \
+    "$DMG_RW_PATH" >/dev/null
+
+DMG_LAYOUT_VOLUME_NAME="$(diskutil info -plist "$DMG_MOUNT_DIR" | plutil -extract VolumeName raw -o - -)"
+DMG_LAYOUT_WRITABLE="$(diskutil info -plist "$DMG_MOUNT_DIR" | plutil -extract WritableVolume raw -o - -)"
+[[ "$DMG_LAYOUT_VOLUME_NAME" == "$DMG_VOLUME_NAME" ]] \
+    || die "unexpected writable DMG volume name: $DMG_LAYOUT_VOLUME_NAME"
+[[ "$DMG_LAYOUT_WRITABLE" == "true" ]] || die "DMG layout volume is not writable"
+
+PYTHONPATH="$DMG_LAYOUT_PYTHONPATH" \
+    "$DMG_LAYOUT_PYTHON" "$DMG_LAYOUT_SCRIPT" write "$DMG_MOUNT_DIR"
+PYTHONPATH="$DMG_LAYOUT_PYTHONPATH" \
+    "$DMG_LAYOUT_PYTHON" "$DMG_LAYOUT_SCRIPT" verify "$DMG_MOUNT_DIR"
+
+# Keep the disk image free of transient per-volume metadata created while the
+# layout volume is writable.
+/bin/rm -rf -- \
+    "$DMG_MOUNT_DIR/.DocumentRevisions-V100" \
+    "$DMG_MOUNT_DIR/.Spotlight-V100" \
+    "$DMG_MOUNT_DIR/.Trashes" \
+    "$DMG_MOUNT_DIR/.fseventsd"
+/usr/bin/find "$DMG_MOUNT_DIR" -mindepth 1 -maxdepth 1 -type f -name '._*' -delete
+sync
+hdiutil detach -quiet "$DMG_MOUNT_DIR"
+DMG_MOUNTED=false
+
+hdiutil convert \
+    -quiet \
+    "$DMG_RW_PATH" \
     -format UDZO \
-    "$DMG_PATH"
+    -imagekey zlib-level=9 \
+    -ov \
+    -o "$DMG_PATH"
 hdiutil verify "$DMG_PATH"
 DMG_FORMAT="$(hdiutil imageinfo -format "$DMG_PATH")"
 [[ "$DMG_FORMAT" == "UDZO" ]] || die "unexpected DMG image format: $DMG_FORMAT"
@@ -305,13 +379,24 @@ DMG_VOLUME_NAME_ACTUAL="$(diskutil info -plist "$DMG_MOUNT_DIR" | plutil -extrac
 
 DMG_APP="$DMG_MOUNT_DIR/$APP_BUNDLE_NAME.app"
 DMG_APPLICATIONS_LINK="$DMG_MOUNT_DIR/Applications"
-DMG_ROOT_ENTRY_COUNT="$(find "$DMG_MOUNT_DIR" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')"
-[[ "$DMG_ROOT_ENTRY_COUNT" == "2" ]] \
-    || die "DMG root must contain only $APP_BUNDLE_NAME.app and Applications"
+DMG_ROOT_ENTRIES="$(find "$DMG_MOUNT_DIR" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort)"
+EXPECTED_DMG_ROOT_ENTRIES="$(printf '%s\n' '.DS_Store' '.background' 'Applications' "$APP_BUNDLE_NAME.app" | LC_ALL=C sort)"
+[[ "$DMG_ROOT_ENTRIES" == "$EXPECTED_DMG_ROOT_ENTRIES" ]] \
+    || die "DMG root contains unexpected entries: $DMG_ROOT_ENTRIES"
 [[ -d "$DMG_APP" && ! -L "$DMG_APP" ]] || die "DMG root is missing $APP_BUNDLE_NAME.app"
 [[ -L "$DMG_APPLICATIONS_LINK" ]] || die "DMG root is missing the Applications symlink"
 [[ "$(readlink "$DMG_APPLICATIONS_LINK")" == "/Applications" ]] \
     || die "DMG Applications symlink does not target /Applications"
+[[ -s "$DMG_MOUNT_DIR/.DS_Store" ]] || die "DMG root is missing its saved Finder layout"
+[[ -f "$DMG_MOUNT_DIR/.background/DMGBackground.png" ]] \
+    || die "DMG root is missing the installer background"
+DMG_BACKGROUND_ENTRY_COUNT="$(find "$DMG_MOUNT_DIR/.background" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')"
+[[ "$DMG_BACKGROUND_ENTRY_COUNT" == "1" ]] \
+    || die "DMG .background must contain only DMGBackground.png"
+cmp -s "$DMG_BACKGROUND_SOURCE" "$DMG_MOUNT_DIR/.background/DMGBackground.png" \
+    || die "DMG installer background differs from the approved artwork"
+PYTHONPATH="$DMG_LAYOUT_PYTHONPATH" \
+    "$DMG_LAYOUT_PYTHON" "$DMG_LAYOUT_SCRIPT" verify "$DMG_MOUNT_DIR"
 
 DMG_INFO_PLIST="$DMG_APP/Contents/Info.plist"
 [[ -f "$DMG_INFO_PLIST" ]] || die "DMG app is missing Contents/Info.plist"
@@ -387,19 +472,21 @@ if [[ "$SKIP_NOTARIZATION" == false ]]; then
         -noautoopen \
         -mountpoint "$DMG_MOUNT_DIR" \
         "$DMG_PATH" >/dev/null
-    STAPLED_DMG_ROOT_ENTRY_COUNT="$(
-        find "$DMG_MOUNT_DIR" -mindepth 1 -maxdepth 1 -print \
-            | wc -l \
-            | tr -d '[:space:]'
-    )"
-    [[ "$STAPLED_DMG_ROOT_ENTRY_COUNT" == "2" ]] \
-        || die "stapled DMG root must contain only $APP_BUNDLE_NAME.app and Applications"
+    STAPLED_DMG_ROOT_ENTRIES="$(find "$DMG_MOUNT_DIR" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort)"
+    [[ "$STAPLED_DMG_ROOT_ENTRIES" == "$EXPECTED_DMG_ROOT_ENTRIES" ]] \
+        || die "stapled DMG root contains unexpected entries: $STAPLED_DMG_ROOT_ENTRIES"
     [[ -d "$DMG_MOUNT_DIR/$APP_BUNDLE_NAME.app" && ! -L "$DMG_MOUNT_DIR/$APP_BUNDLE_NAME.app" ]] \
         || die "stapled DMG root is missing $APP_BUNDLE_NAME.app"
     [[ -L "$DMG_MOUNT_DIR/Applications" ]] \
         || die "stapled DMG root is missing the Applications symlink"
     [[ "$(readlink "$DMG_MOUNT_DIR/Applications")" == "/Applications" ]] \
         || die "stapled DMG Applications symlink does not target /Applications"
+    [[ -s "$DMG_MOUNT_DIR/.DS_Store" ]] \
+        || die "stapled DMG root is missing its saved Finder layout"
+    cmp -s "$DMG_BACKGROUND_SOURCE" "$DMG_MOUNT_DIR/.background/DMGBackground.png" \
+        || die "stapled DMG installer background differs from the approved artwork"
+    PYTHONPATH="$DMG_LAYOUT_PYTHONPATH" \
+        "$DMG_LAYOUT_PYTHON" "$DMG_LAYOUT_SCRIPT" verify "$DMG_MOUNT_DIR"
     STAPLED_DMG_INFO_PLIST="$DMG_MOUNT_DIR/$APP_BUNDLE_NAME.app/Contents/Info.plist"
     [[ -f "$STAPLED_DMG_INFO_PLIST" ]] || die "stapled DMG app is missing Contents/Info.plist"
     verify_image_document_registration "$STAPLED_DMG_INFO_PLIST" "stapled DMG app Info.plist"
