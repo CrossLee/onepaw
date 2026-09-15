@@ -19,10 +19,10 @@
 
 | 平台 | 最新已发布版本 | 安装包 | 发布状态 |
 | :--- | :--- | :--- | :--- |
-| macOS 14+ · Apple Silicon / Intel | [0.6.7](https://github.com/CrossLee/onepaw/releases/tag/v0.6.7) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.7/OnePaw-0.6.7-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
+| macOS 14+ · Apple Silicon / Intel | [0.6.8](https://github.com/CrossLee/onepaw/releases/tag/v0.6.8) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.8/OnePaw-0.6.8-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
 | Windows 11 · x64 / ARM64 | [0.1.29.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.29.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.29.0-preview/OnePaw-Windows-0.1.29.0-Setup.exe)** | 预览版 · 尚未签名 |
 
-Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.7/OnePaw-0.6.7-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.7/OnePaw-0.6.7-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
+Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.8/OnePaw-0.6.8-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.8/OnePaw-0.6.8-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
 
 Windows 安装器可直接双击，自动选择架构，不需要操作 PowerShell。当前仍是未签名预览版，可能出现“未知发布者”提示，部分设备策略会阻止安装；不要关闭安全保护来绕过限制。[签名进度与说明](docs/windows-signing.md)
 
@@ -72,7 +72,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 
 Universal 2 同时支持 Apple Silicon 与 Intel，无需 Rosetta。macOS 14 可用除本机翻译以外的其他功能；本机翻译需要 macOS 15+。
 
-**从旧名称升级到一爪，请下载 0.6.7 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
+**从旧名称升级到一爪，请下载 0.6.8 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
 
 安装并打开一次后，系统才会注册 Finder 服务；若“复制路径”未显示，可检查系统键盘快捷键中的“服务”。
 

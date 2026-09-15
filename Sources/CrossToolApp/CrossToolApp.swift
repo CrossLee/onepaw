@@ -15,6 +15,7 @@ struct CrossToolApp: App {
         } label: {
             MenuBarStatusLabel(
                 model: model,
+                recording: model.screenRecording,
                 mainWindowPresenter: mainWindowPresenter
             )
         }
@@ -22,32 +23,120 @@ struct CrossToolApp: App {
     }
 }
 
+enum MenuBarStatusBadge: Equatable {
+    case sharing
+    case recording
+}
+
+enum MenuBarStatusState: Equatable {
+    case idle
+    case sharing
+    case recording
+
+    init(isRecording: Bool, isServerRunning: Bool) {
+        if isRecording {
+            self = .recording
+        } else if isServerRunning {
+            self = .sharing
+        } else {
+            self = .idle
+        }
+    }
+
+    var systemImageName: String {
+        "pawprint.fill"
+    }
+
+    var badge: MenuBarStatusBadge? {
+        switch self {
+        case .idle:
+            nil
+        case .sharing:
+            .sharing
+        case .recording:
+            .recording
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .idle:
+            ApplicationBrand.displayName
+        case .sharing:
+            "\(ApplicationBrand.displayName)正在共享"
+        case .recording:
+            "\(ApplicationBrand.displayName)正在录屏"
+        }
+    }
+}
+
 private struct MenuBarStatusLabel: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var recording: ScreenRecordingFeatureModel
     let mainWindowPresenter: MainWindowPresenter
 
-    var body: some View {
-        Label(
-            model.screenRecording.isRecording ? "\(ApplicationBrand.displayName)正在录屏" : ApplicationBrand.displayName,
-            systemImage: model.screenRecording.isRecording
-                ? "record.circle.fill"
-                : (model.isServerRunning ? "square.and.arrow.up.fill" : "square.and.arrow.up")
+    private var state: MenuBarStatusState {
+        MenuBarStatusState(
+            isRecording: recording.isRecording,
+            isServerRunning: model.isServerRunning
         )
-        .onAppear {
-            openMainWindowIfNeeded(for: model.mainWindowOpenRequestID)
-        }
-        .onChange(of: model.mainWindowOpenRequestID) { _, requestID in
-            openMainWindowIfNeeded(for: requestID)
-        }
-        .onChange(of: model.mainWindowDismissRequestID) { _, requestID in
-            guard requestID > 0 else { return }
-            mainWindowPresenter.dismiss()
-        }
+    }
+
+    var body: some View {
+        MenuBarStatusGlyph(state: state)
+            .accessibilityLabel(state.accessibilityLabel)
+            .help(state.accessibilityLabel)
+            .onAppear {
+                openMainWindowIfNeeded(for: model.mainWindowOpenRequestID)
+            }
+            .onChange(of: model.mainWindowOpenRequestID) { _, requestID in
+                openMainWindowIfNeeded(for: requestID)
+            }
+            .onChange(of: model.mainWindowDismissRequestID) { _, requestID in
+                guard requestID > 0 else { return }
+                mainWindowPresenter.dismiss()
+            }
     }
 
     private func openMainWindowIfNeeded(for requestID: Int) {
         guard model.claimMainWindowOpenRequest(requestID) else { return }
         mainWindowPresenter.present(model: model)
+    }
+}
+
+private struct MenuBarStatusGlyph: View {
+    let state: MenuBarStatusState
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Image(systemName: state.systemImageName)
+                .font(.system(size: 15, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .frame(width: 17, height: 17)
+
+            if let badge = state.badge {
+                MenuBarStatusBadgeGlyph(badge: badge)
+                    .frame(width: 5, height: 5)
+                    .offset(x: 0.75, y: -0.25)
+            }
+        }
+        .frame(width: 19, height: 18)
+    }
+}
+
+private struct MenuBarStatusBadgeGlyph: View {
+    let badge: MenuBarStatusBadge
+
+    @ViewBuilder
+    var body: some View {
+        switch badge {
+        case .sharing:
+            Circle()
+                .fill(Color.green)
+        case .recording:
+            Circle()
+                .strokeBorder(Color.red, lineWidth: 1.35)
+        }
     }
 }
 
