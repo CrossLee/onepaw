@@ -20,7 +20,7 @@
 | 平台 | 最新已发布版本 | 安装包 | 发布状态 |
 | :--- | :--- | :--- | :--- |
 | macOS 14+ · Apple Silicon / Intel | [0.6.6](https://github.com/CrossLee/onepaw/releases/tag/v0.6.6) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/OnePaw-0.6.6-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
-| Windows 11 · x64 / ARM64 | [0.1.20.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.20.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.20.0-preview/Crosio-Windows-0.1.20.0-Setup.exe)** | 预览版 · 尚未签名 |
+| Windows 11 · x64 / ARM64 | [0.1.29.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.29.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.29.0-preview/OnePaw-Windows-0.1.29.0-Setup.exe)** | 预览版 · 尚未签名 |
 
 Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/OnePaw-0.6.6-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/OnePaw-0.6.6-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
 
