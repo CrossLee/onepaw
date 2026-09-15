@@ -44,7 +44,7 @@ enum MenuBarStatusState: Equatable {
     }
 
     var systemImageName: String {
-        "pawprint.fill"
+        "cat.fill"
     }
 
     var badge: MenuBarStatusBadge? {

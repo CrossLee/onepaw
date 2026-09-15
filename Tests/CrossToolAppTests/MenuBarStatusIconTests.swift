@@ -3,14 +3,14 @@ import Testing
 
 @Suite("Menu bar status icon")
 struct MenuBarStatusIconTests {
-    @Test("OnePaw remains the menu bar symbol in every state")
+    @Test("The cat remains the menu bar symbol in every state")
     func brandSymbolDoesNotDisappearWhenStateChanges() {
         for state in [
             MenuBarStatusState.idle,
             .sharing,
             .recording,
         ] {
-            #expect(state.systemImageName == "pawprint.fill")
+            #expect(state.systemImageName == "cat.fill")
         }
     }
 
