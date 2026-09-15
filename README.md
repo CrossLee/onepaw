@@ -19,14 +19,14 @@
 
 | 平台 | 最新已发布版本 | 安装包 | 发布状态 |
 | :--- | :--- | :--- | :--- |
-| macOS 14+ · Apple Silicon / Intel | [0.6.5](https://github.com/CrossLee/onepaw/releases/tag/v0.6.5) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.5/Crosio-0.6.5-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
+| macOS 14+ · Apple Silicon / Intel | [0.6.6](https://github.com/CrossLee/onepaw/releases/tag/v0.6.6) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/%E4%B8%80%E7%88%AA-0.6.6-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
 | Windows 11 · x64 / ARM64 | [0.1.20.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.20.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.20.0-preview/Crosio-Windows-0.1.20.0-Setup.exe)** | 预览版 · 尚未签名 |
 
-Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.5/Crosio-0.6.5-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.5/Crosio-0.6.5-macos-universal2.zip)。版本信息更新于 **2026-09-09**。
+Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/%E4%B8%80%E7%88%AA-0.6.6-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/%E4%B8%80%E7%88%AA-0.6.6-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
 
 Windows 安装器可直接双击，自动选择架构，不需要操作 PowerShell。当前仍是未签名预览版，可能出现“未知发布者”提示，部分设备策略会阻止安装；不要关闭安全保护来绕过限制。[签名进度与说明](docs/windows-signing.md)
 
-**更名版已完成开发与构建验证，尚未公开发布。** macOS 0.6.6 与 Windows 0.1.21.0 的界面、菜单和新安装包已统一使用“一爪”；上表仍是上一已发布版本，下载后的名称可能不同。既有安装身份和数据目录继续保留。[更名与升级兼容说明](docs/branding.md)
+macOS 0.6.6 是首个以“一爪.app”正式发布的 Mac 版本；Windows 新版仍按独立流水线验证并发布为未签名预览版。两端既有安装身份和数据目录继续保留。[更名与升级兼容说明](docs/branding.md)
 
 GitHub 的 “Source code” 是源码，不是安装包。
 
@@ -47,7 +47,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 - **屏幕录制** — 录屏幕、窗口或指定区域，按需保留系统声音和鼠标指针。Mac 当前不采集麦克风，成片默认只保存在本机。
 - **屏幕取色** — 提取标准 sRGB 颜色，复制 HEX、RGB 或 HSL，保存最近使用的颜色。
 - **本机翻译** — 双栏翻译，也可为选中文字设置快捷中英互译。Mac 需要 macOS 15+；两平台首次准备语言模型可能需要联网。
-- **局域网分享** — 分享文件、图片、文字和链接。其他人用浏览器即可查看、下载、上传，不需要安装客户端；你随时可以停止共享。
+- **局域网分享** — 分享文件、图片、文字和链接。其他人用浏览器即可查看、下载、上传，不需要安装客户端；Mac 和 Windows 默认使用 10 位随机访问码，也可改成 6–24 位自定义访问码。换码后旧链接立即失效，你也随时可以停止共享。
 
 此外还提供自定义全局快捷键、登录时启动，以及文件/文件夹的右键复制路径。Mac 的复制路径位于 Finder“服务”菜单，后台完成，不弹主界面。
 
@@ -72,7 +72,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 
 Universal 2 同时支持 Apple Silicon 与 Intel，无需 Rosetta。macOS 14 可用除本机翻译以外的其他功能；本机翻译需要 macOS 15+。
 
-**从旧名称升级到一爪，请等待 0.6.6 更名版 PKG。** 新 PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。当前上表的 0.6.5 安装包不包含这次更名。DMG/ZIP 不自动迁移旧名称，直接拖入会留下两个应用目录。
+**从旧名称升级到一爪，请下载 0.6.6 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
 
 安装并打开一次后，系统才会注册 Finder 服务；若“复制路径”未显示，可检查系统键盘快捷键中的“服务”。
 
@@ -95,7 +95,7 @@ Universal 2 同时支持 Apple Silicon 与 Intel，无需 Rosetta。macOS 14 可
 
 - **内容留在本机。** 截图 OCR、图片压缩和翻译处理不上传到 OnePaw 自建云服务。首次语言模型下载与内容处理是两回事。
 - **分享由你决定。** 自动复制截图、OCR 识字、录屏和翻译不会把内容自动加入共享区。
-- **面向局域网分享。** 不内置公网穿透或云端中继，请勿将服务端口映射到公网。能访问服务且持有当前分享链接的人可以查看、下载和上传，请只发给可信参与者。停止共享会停止本地 HTTP 服务。
+- **面向局域网分享。** 不内置公网穿透或云端中继，请勿将服务端口映射到公网。访问码会明文包含在链接、二维码和浏览器历史中，它用于限制误访问，不等同于加密密码。能访问服务且持有当前分享链接的人可以查看、下载和上传，请只发给可信参与者；需要撤销旧链接时可立即更换访问码或停止共享。
 - **保留原文件。** 压缩只在结果确实更小时保存新文件，不承诺所有图片都能达到指定体积，也不把有损压缩称为无损。
 
 Mac 兼容数据目录为 `~/Library/Application Support/crosstool`。浏览器上传单文件上限为 256 MB；本地网络、屏幕录制和辅助功能权限均按使用场景申请。

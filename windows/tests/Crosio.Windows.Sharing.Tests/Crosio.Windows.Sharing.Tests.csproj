@@ -20,6 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../src/Crosio.Windows.Core/Crosio.Windows.Core.csproj" />
     <ProjectReference Include="../../src/Crosio.Windows.Sharing/Crosio.Windows.Sharing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../src/Crosio.Windows.App/SharingAccessCodeSettingsService.cs"
+             Link="SharingAccessCodeSettingsService.cs" />
   </ItemGroup>
 </Project>

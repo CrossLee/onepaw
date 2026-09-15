@@ -77,4 +77,35 @@ public sealed class AppSettingsTests
             AppSettingsValidator.Validate(settings),
             issue => issue.Field == "preferredSharingPort");
     }
+
+    [Theory]
+    [InlineData("abc123")]
+    [InlineData("Class-2026_A")]
+    [InlineData("123456789012345678901234")]
+    public void ValidCustomShareAccessCodesAreAccepted(string value)
+    {
+        var settings = new AppSettings { CustomShareAccessCode = value };
+
+        Assert.DoesNotContain(
+            AppSettingsValidator.Validate(settings),
+            issue => issue.Field == "customShareAccessCode");
+    }
+
+    [Theory]
+    [InlineData("12345")]
+    [InlineData("1234567890123456789012345")]
+    [InlineData("  abc123")]
+    [InlineData("课堂2026")]
+    [InlineData("abc?123")]
+    [InlineData("abc&123")]
+    [InlineData("abc#123")]
+    public void InvalidCustomShareAccessCodesAreRejected(string value)
+    {
+        var settings = new AppSettings { CustomShareAccessCode = value };
+
+        Assert.Contains(
+            AppSettingsValidator.Validate(settings),
+            issue => issue.Field == "customShareAccessCode"
+                && issue.Code == "invalid-access-code");
+    }
 }

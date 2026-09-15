@@ -11,6 +11,11 @@ public struct StaticWebAsset: Sendable {
 }
 
 public final class HTTPRouter: @unchecked Sendable {
+    private struct SessionCredential: Equatable {
+        let token: String
+        let generation: UInt64
+    }
+
     private struct WebItem: Encodable {
         let id: UUID
         let kind: SharedItemKind
@@ -38,7 +43,14 @@ public final class HTTPRouter: @unchecked Sendable {
         let text: String
     }
 
-    public let sessionToken: String
+    public var sessionToken: String {
+        sessionCredential.token
+    }
+
+    private let sessionTokenLock = NSLock()
+    private let sessionMutationLock = NSLock()
+    private var storedSessionToken: String
+    private var sessionTokenGeneration: UInt64 = 0
     private let store: SharedContentStore
     private let indexHTML: Data
     private let assets: [String: StaticWebAsset]
@@ -50,9 +62,20 @@ public final class HTTPRouter: @unchecked Sendable {
         assets: [String: StaticWebAsset] = [:]
     ) {
         self.store = store
-        self.sessionToken = sessionToken
+        self.storedSessionToken = sessionToken
         self.indexHTML = indexHTML
         self.assets = assets
+    }
+
+    public func updateSessionToken(_ sessionToken: String) {
+        sessionMutationLock.lock()
+        defer { sessionMutationLock.unlock() }
+        sessionTokenLock.lock()
+        defer { sessionTokenLock.unlock() }
+        if storedSessionToken != sessionToken {
+            storedSessionToken = sessionToken
+            sessionTokenGeneration &+= 1
+        }
     }
 
     public func handle(_ request: HTTPRequest) -> HTTPResponse {
@@ -64,9 +87,15 @@ public final class HTTPRouter: @unchecked Sendable {
             )
         }
 
+        // Keep one credential snapshot for the entire request. If the owner
+        // rotates the access code concurrently, a request authenticated with
+        // the old code must never receive a download URL containing the new
+        // code.
+        let requestCredential = sessionCredential
+
         if request.path == "/" {
             guard request.method == "GET" else { return methodNotAllowed() }
-            guard isAuthorized(request) else {
+            guard isAuthorized(request, sessionToken: requestCredential.token) else {
                 return HTTPResponse.text(
                     unauthorizedHTML,
                     statusCode: 403,
@@ -83,7 +112,7 @@ public final class HTTPRouter: @unchecked Sendable {
             )
         }
 
-        guard isAuthorized(request) else {
+        guard isAuthorized(request, sessionToken: requestCredential.token) else {
             return errorResponse("无效或已过期的共享链接", statusCode: 403)
         }
 
@@ -91,13 +120,13 @@ public final class HTTPRouter: @unchecked Sendable {
         case ("GET", "/api/health"):
             return HTTPResponse.json(OperationPayload(ok: true, id: nil, name: nil, error: nil))
         case ("GET", "/api/items"):
-            return listItems()
+            return listItems(sessionToken: requestCredential.token)
         case ("POST", "/api/upload"):
-            return receiveUpload(request)
+            return receiveUpload(request, credential: requestCredential)
         case ("POST", "/api/text"):
-            return receiveText(request)
+            return receiveText(request, credential: requestCredential)
         case ("GET", let path) where path.hasPrefix("/download/"):
-            return download(path: path, request: request)
+            return download(path: path, request: request, credential: requestCredential)
         default:
             if ["GET", "POST"].contains(request.method) {
                 return errorResponse("页面不存在", statusCode: 404)
@@ -106,8 +135,7 @@ public final class HTTPRouter: @unchecked Sendable {
         }
     }
 
-    private func listItems() -> HTTPResponse {
-        let token = sessionToken.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? sessionToken
+    private func listItems(sessionToken: String) -> HTTPResponse {
         let items = store.publicSnapshot().map { item in
             WebItem(
                 id: item.id,
@@ -117,14 +145,20 @@ public final class HTTPRouter: @unchecked Sendable {
                 size: item.byteCount,
                 mimeType: item.mimeType,
                 source: item.direction == .outgoing ? "teacher" : "browser",
-                downloadURL: item.fileURL == nil ? nil : "/download/\(item.id.uuidString)?token=\(token)",
+                downloadURL: item.fileURL == nil ? nil : ShareLinkBuilder.relativeURL(
+                    path: "/download/\(item.id.uuidString)",
+                    accessCode: sessionToken
+                ),
                 createdAt: item.createdAt
             )
         }
         return HTTPResponse.json(ItemsPayload(items: items))
     }
 
-    private func receiveUpload(_ request: HTTPRequest) -> HTTPResponse {
+    private func receiveUpload(
+        _ request: HTTPRequest,
+        credential: SessionCredential
+    ) -> HTTPResponse {
         guard request.body.count <= SharedContentStore.maximumUploadBytes + 1_048_576 else {
             return errorResponse("上传文件超过 256 MB 限制", statusCode: 413)
         }
@@ -135,40 +169,80 @@ public final class HTTPRouter: @unchecked Sendable {
             return errorResponse("没有找到可上传的文件", statusCode: 400)
         }
 
+        let stagedFile: StagedIncomingFile
         do {
-            let item = try store.receiveFile(
-                data: file.data,
-                filename: file.filename,
-                remoteAddress: request.remoteAddress
-            )
-            return HTTPResponse.json(
-                OperationPayload(ok: true, id: item.id, name: item.title, error: nil),
-                statusCode: 201
-            )
+            stagedFile = try store.stageReceivedFile(data: file.data, filename: file.filename)
         } catch {
             return errorResponse(error.localizedDescription, statusCode: 500)
         }
+
+        var didCommit = false
+        defer {
+            if !didCommit {
+                store.discardStagedFile(stagedFile)
+            }
+        }
+        let response = withCurrentSession(credential) {
+            do {
+                let item = try store.commitReceivedFile(
+                    stagedFile,
+                    remoteAddress: request.remoteAddress,
+                    notifyChange: false
+                )
+                didCommit = true
+                return HTTPResponse.json(
+                    OperationPayload(ok: true, id: item.id, name: item.title, error: nil),
+                    statusCode: 201
+                )
+            } catch {
+                return errorResponse(error.localizedDescription, statusCode: 500)
+            }
+        }
+        if didCommit {
+            store.notifyObservers()
+        }
+        return response ?? expiredLinkResponse()
     }
 
-    private func receiveText(_ request: HTTPRequest) -> HTTPResponse {
+    private func receiveText(
+        _ request: HTTPRequest,
+        credential: SessionCredential
+    ) -> HTTPResponse {
         guard request.body.count <= 64 * 1024 else {
             return errorResponse("文字内容过长", statusCode: 413)
         }
         guard let payload = try? JSONDecoder().decode(TextPayload.self, from: request.body) else {
             return errorResponse("文字请求格式不正确", statusCode: 400)
         }
-        do {
-            let item = try store.receiveText(payload.text, remoteAddress: request.remoteAddress)
-            return HTTPResponse.json(
-                OperationPayload(ok: true, id: item.id, name: item.title, error: nil),
-                statusCode: 201
-            )
-        } catch {
-            return errorResponse(error.localizedDescription, statusCode: 400)
+        var didCommit = false
+        let response = withCurrentSession(credential) {
+            do {
+                let item = try store.receiveText(
+                    payload.text,
+                    remoteAddress: request.remoteAddress,
+                    notifyChange: false
+                )
+                didCommit = true
+                return HTTPResponse.json(
+                    OperationPayload(ok: true, id: item.id, name: item.title, error: nil),
+                    statusCode: 201
+                )
+            } catch {
+                return errorResponse(error.localizedDescription, statusCode: 400)
+            }
         }
+        if didCommit {
+            store.notifyObservers()
+        }
+        return response ?? expiredLinkResponse()
     }
 
-    private func download(path: String, request: HTTPRequest) -> HTTPResponse {
+    private func download(
+        path: String,
+        request: HTTPRequest,
+        credential: SessionCredential
+    ) -> HTTPResponse {
+        guard isCurrent(credential) else { return expiredLinkResponse() }
         let idText = String(path.dropFirst("/download/".count))
         guard let id = UUID(uuidString: idText),
               let item = store.publicItem(id: id),
@@ -178,6 +252,7 @@ public final class HTTPRouter: @unchecked Sendable {
 
         do {
             let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            guard isCurrent(credential) else { return expiredLinkResponse() }
             var responseData = data
             var statusCode = 200
             var headers = [
@@ -198,9 +273,53 @@ public final class HTTPRouter: @unchecked Sendable {
         }
     }
 
-    private func isAuthorized(_ request: HTTPRequest) -> Bool {
+    private func isAuthorized(_ request: HTTPRequest, sessionToken: String) -> Bool {
         let candidate = request.query["token"] ?? request.headers["x-crosstool-token"]
-        return candidate == sessionToken
+        guard let candidate else { return false }
+        let candidateBytes = Array(candidate.utf8)
+        let tokenBytes = Array(sessionToken.utf8)
+        guard candidateBytes.count == tokenBytes.count else { return false }
+
+        var difference: UInt8 = 0
+        for index in candidateBytes.indices {
+            difference |= candidateBytes[index] ^ tokenBytes[index]
+        }
+        return difference == 0
+    }
+
+    private var sessionCredential: SessionCredential {
+        sessionTokenLock.lock()
+        defer { sessionTokenLock.unlock() }
+        return SessionCredential(
+            token: storedSessionToken,
+            generation: sessionTokenGeneration
+        )
+    }
+
+    private func isCurrent(_ credential: SessionCredential) -> Bool {
+        sessionTokenLock.lock()
+        defer { sessionTokenLock.unlock() }
+        return credential.token == storedSessionToken
+            && credential.generation == sessionTokenGeneration
+    }
+
+    private func withCurrentSession<T>(
+        _ credential: SessionCredential,
+        perform body: () -> T
+    ) -> T? {
+        // Serialize only the short final commit with credential rotation. File
+        // data is staged before this point, so changing the access code never
+        // waits for a potentially large disk write. The token lock itself is
+        // not held while callbacks run, avoiding lock re-entry through change
+        // handlers that read the current token.
+        sessionMutationLock.lock()
+        defer { sessionMutationLock.unlock() }
+        guard isCurrent(credential) else { return nil }
+        return body()
+    }
+
+    private func expiredLinkResponse() -> HTTPResponse {
+        errorResponse("无效或已过期的共享链接", statusCode: 403)
     }
 
     private func errorResponse(_ message: String, statusCode: Int) -> HTTPResponse {

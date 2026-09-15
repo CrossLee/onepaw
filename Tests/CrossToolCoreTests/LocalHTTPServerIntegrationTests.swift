@@ -87,6 +87,34 @@ func liveHTTPServerCompletesBrowserFlow() async throws {
     let forbiddenURL = try #require(URL(string: "\(base.absoluteString)/api/items"))
     let (_, forbiddenResponse) = try await URLSession.shared.data(from: forbiddenURL)
     #expect((forbiddenResponse as? HTTPURLResponse)?.statusCode == 403)
+
+    let publicItemCountBeforeRotation = store.publicSnapshot().count
+    router.updateSessionToken("class2026")
+
+    let (_, staleListResponse) = try await browserA.data(from: listURL)
+    #expect((staleListResponse as? HTTPURLResponse)?.statusCode == 403)
+    let (_, staleDownloadResponse) = try await browserB.data(from: downloadURL)
+    #expect((staleDownloadResponse as? HTTPURLResponse)?.statusCode == 403)
+
+    let rotatedListURL = try #require(
+        URL(string: "\(base.absoluteString)/api/items?token=class2026")
+    )
+    let (rotatedListData, rotatedListResponse) = try await browserA.data(from: rotatedListURL)
+    #expect((rotatedListResponse as? HTTPURLResponse)?.statusCode == 200)
+    let rotatedListText = try #require(String(data: rotatedListData, encoding: .utf8))
+    #expect(rotatedListText.contains("shared.txt"))
+    #expect(rotatedListText.contains("live-upload.txt"))
+    #expect(rotatedListText.contains("token=class2026"))
+
+    let rotatedDownloadURL = try #require(
+        URL(string: "\(base.absoluteString)/download/\(shared.id)?token=class2026")
+    )
+    let (rotatedDownloadData, rotatedDownloadResponse) = try await browserB.data(
+        from: rotatedDownloadURL
+    )
+    #expect((rotatedDownloadResponse as? HTTPURLResponse)?.statusCode == 200)
+    #expect(rotatedDownloadData == sharedBytes)
+    #expect(store.publicSnapshot().count == publicItemCountBeforeRotation)
 }
 
 private func waitUntilReady(base: URL, token: String) async throws {

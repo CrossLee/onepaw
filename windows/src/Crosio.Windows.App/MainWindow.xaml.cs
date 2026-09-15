@@ -244,11 +244,13 @@ public sealed partial class MainWindow : Window
             case FeatureId.ShareText:
                 SharingPanel.Visibility = Visibility.Visible;
                 UpdateSharingSummary();
+                _ = RefreshSharingAccessCodeAsync();
                 break;
             case FeatureId.Settings:
                 SettingsPanel.Visibility = Visibility.Visible;
                 _ = RefreshStartupStateAsync();
                 _ = RefreshHotkeyStateAsync();
+                _ = RefreshSharingAccessCodeAsync();
                 break;
         }
     }
@@ -924,6 +926,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            ApplySharingAccessCodeState(await _services.SharingAccessCodes.InitializeAsync());
             await _services.SharingServer.StartAsync();
             UpdateSharingSummary();
             ShowFeatureStatus("局域网共享已开始。", isError: false);
@@ -938,6 +941,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            ApplySharingAccessCodeState(await _services.SharingAccessCodes.InitializeAsync());
             await _services.SharingServer.StartAsync();
             var uri = _services.SharingServer.SharingUris.FirstOrDefault();
             if (uri is null)
@@ -970,6 +974,79 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void SaveSharingAccessCode_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            var previousCode = _services.SharingServer.SessionToken;
+            var value = sender is Button { Tag: string tag }
+                && string.Equals(tag, "settings", StringComparison.Ordinal)
+                ? SettingsShareAccessCodeBox.Text
+                : SharingAccessCodeBox.Text;
+            var state = await _services.SharingAccessCodes.SaveCustomAsync(value);
+            ApplySharingAccessCodeState(state);
+            UpdateSharingSummary();
+            ShowFeatureStatus(
+                string.Equals(state.AccessCode, previousCode, StringComparison.Ordinal)
+                    ? "共享访问码已保存。"
+                    : "共享访问码已更新，旧链接已经失效。",
+                isError: false);
+        }
+        catch (ArgumentException error)
+        {
+            ShowFeatureStatus(error.Message, isError: true);
+        }
+        catch (Exception error)
+        {
+            ShowFeatureStatus($"保存共享访问码失败：{error.Message}", isError: true);
+        }
+    }
+
+    private async void ResetSharingAccessCode_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            var state = await _services.SharingAccessCodes.ResetToRandomAsync();
+            ApplySharingAccessCodeState(state);
+            UpdateSharingSummary();
+            ShowFeatureStatus("已换用新的随机访问码，旧链接已经失效。", isError: false);
+        }
+        catch (Exception error)
+        {
+            ShowFeatureStatus($"更新随机访问码失败：{error.Message}", isError: true);
+        }
+    }
+
+    private async Task RefreshSharingAccessCodeAsync()
+    {
+        try
+        {
+            var state = await _services.SharingAccessCodes.InitializeAsync(
+                cancellationToken: _windowLifetimeCancellation.Token);
+            ApplySharingAccessCodeState(state);
+            UpdateSharingSummary();
+        }
+        catch (OperationCanceledException) when (_windowLifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            SharingAccessCodeStatusText.Text = $"无法读取共享访问码：{error.Message}";
+            SettingsShareAccessCodeStatusText.Text = SharingAccessCodeStatusText.Text;
+        }
+    }
+
+    private void ApplySharingAccessCodeState(SharingAccessCodeState state)
+    {
+        SharingAccessCodeBox.Text = state.AccessCode;
+        SettingsShareAccessCodeBox.Text = state.AccessCode;
+        var message = state.IsCustom
+            ? "当前使用自定义访问码；区分大小写。访问码会明文出现在链接中，请勿复用重要密码。"
+            : "当前使用 10 位随机访问码；可直接改成自己的访问码。访问码会明文出现在链接中。";
+        SharingAccessCodeStatusText.Text = message;
+        SettingsShareAccessCodeStatusText.Text = message;
+    }
+
     private async void StartWithWindowsToggle_Toggled(object sender, RoutedEventArgs args)
     {
         if (_loadingStartupState)
@@ -992,6 +1069,7 @@ public sealed partial class MainWindow : Window
                 StartWithWindows = result.Status == StartupRegistrationStatus.Enabled,
                 RunInBackground = current.RunInBackground,
                 PreferredSharingPort = current.PreferredSharingPort,
+                CustomShareAccessCode = current.CustomShareAccessCode,
                 Hotkeys = current.Hotkeys,
             });
 
@@ -1331,10 +1409,15 @@ public sealed partial class MainWindow : Window
         var itemCount = _services.SharedContent.PublicSnapshot().Count;
         var state = _services.SharingServer.State;
         var address = state.Status == SharingServerStatus.Running
-            ? _services.SharingServer.SharingUris.FirstOrDefault()?.AbsoluteUri ?? "正在等待局域网地址"
+            ? BaseSharingAddress(_services.SharingServer.SharingUris.FirstOrDefault())
             : "当前未共享";
-        SharingSummary.Text = $"共享区 {itemCount} 项 · {address}";
+        SharingSummary.Text =
+            $"共享区 {itemCount} 项 · {address} · 访问码 {_services.SharingServer.SessionToken}";
     }
+
+    private static string BaseSharingAddress(Uri? uri) => uri is null
+        ? "正在等待局域网地址"
+        : uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {

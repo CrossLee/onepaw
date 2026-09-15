@@ -113,6 +113,9 @@ internal sealed class FeatureServices : IAsyncDisposable
         _sharingServer = new Lazy<LocalSharingServer>(
             () => new LocalSharingServer(_sharedContent),
             LazyThreadSafetyMode.ExecutionAndPublication);
+        SharingAccessCodes = new SharingAccessCodeSettingsService(
+            Settings,
+            () => _sharingServer.Value);
     }
 
     public IImageCompressionService ImageCompression { get; }
@@ -158,6 +161,8 @@ internal sealed class FeatureServices : IAsyncDisposable
     public string RecordingsDirectory { get; }
 
     public ISettingsStore Settings { get; }
+
+    public SharingAccessCodeSettingsService SharingAccessCodes { get; }
 
     public TranslationHistoryStore TranslationHistory { get; }
 

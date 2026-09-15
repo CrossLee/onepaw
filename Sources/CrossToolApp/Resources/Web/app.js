@@ -39,6 +39,7 @@
     uploading: false,
     sendingText: false,
     interactionEnabled: Boolean(token),
+    linkExpired: false,
     uploadEntries: [],
     downloads: [],
     toastTimer: null,
@@ -74,7 +75,7 @@
         ...options
       });
     } catch (_error) {
-      throw new APIError("无法连接这台 Mac，请确认仍在同一局域网。", 0);
+      throw new APIError("无法连接这台电脑，请确认仍在同一局域网。", 0);
     }
 
     let payload = null;
@@ -90,7 +91,7 @@
     }
 
     if (!payload || typeof payload !== "object") {
-      throw new APIError("这台 Mac 返回了无法识别的数据。", response.status);
+      throw new APIError("这台电脑返回了无法识别的数据。", response.status);
     }
     return payload;
   }
@@ -321,8 +322,19 @@
     elements.emptyDescription.textContent = "老师或同学上传文件、发送文字后，会立即出现在这里。";
   }
 
+  function expireLink() {
+    state.linkExpired = true;
+    renderLoadFailure("共享访问码已经更换，请向分享者获取新链接。");
+    setConnectionState(false, "链接失效");
+    showAlert("共享链接已失效，请向分享者获取新链接。");
+    state.lastRefresh = null;
+    elements.lastUpdated.textContent = "等待新的共享链接";
+    setInteractionEnabled(false);
+    elements.refreshButton.disabled = true;
+  }
+
   async function refreshItems({ initial = false, quiet = false } = {}) {
-    if (state.refreshing || !token) return;
+    if (state.refreshing || !token || state.linkExpired) return;
     state.refreshing = true;
     elements.refreshButton.disabled = true;
     elements.refreshButton.classList.add("is-loading");
@@ -334,6 +346,9 @@
 
     try {
       const payload = await requestJSON("/api/items");
+      // Another request may have learned that this URL expired while this
+      // refresh was still in flight. Never let a late success revive stale UI.
+      if (state.linkExpired) return;
       resetEmptyCopy();
       renderItems(payload.items);
       state.lastRefresh = new Date();
@@ -343,13 +358,19 @@
       if (!quiet && !initial) showToast("共享内容已刷新");
     } catch (error) {
       const message = error instanceof Error ? error.message : "无法读取共享内容。";
-      if (initial) renderLoadFailure(message);
-      setConnectionState(false, error instanceof APIError && error.status === 403 ? "链接失效" : "连接中断");
-      showAlert(error instanceof APIError && error.status === 403 ? "共享链接已失效，请向分享者获取新链接。" : message);
-      if (error instanceof APIError && error.status === 403) setInteractionEnabled(false);
+      const linkExpired = error instanceof APIError && error.status === 403;
+      if (initial || linkExpired) {
+        renderLoadFailure(linkExpired ? "共享访问码已经更换，请向分享者获取新链接。" : message);
+      }
+      if (linkExpired) {
+        expireLink();
+      } else {
+        setConnectionState(false, "连接中断");
+        showAlert(message);
+      }
     } finally {
       elements.loadingList.hidden = true;
-      elements.refreshButton.disabled = false;
+      elements.refreshButton.disabled = !state.interactionEnabled;
       elements.refreshButton.classList.remove("is-loading");
       elements.refreshButton.removeAttribute("aria-busy");
       state.refreshing = false;
@@ -407,9 +428,7 @@
       entry.status = "error";
       entry.message = error instanceof Error ? error.message : "发送失败";
       if (error instanceof APIError && error.status === 403) {
-        setConnectionState(false, "链接失效");
-        setInteractionEnabled(false);
-        showAlert("共享链接已失效，请向分享者获取新链接。");
+        expireLink();
       }
       return false;
     } finally {
@@ -533,9 +552,7 @@
       await refreshPublicListAfterPublish();
     } catch (error) {
       if (error instanceof APIError && error.status === 403) {
-        setConnectionState(false, "链接失效");
-        setInteractionEnabled(false);
-        showAlert("共享链接已失效，请向分享者获取新链接。");
+        expireLink();
       }
       setTextStatus(error instanceof Error ? error.message : "文字发送失败，请重试。", "error");
     } finally {
@@ -610,7 +627,7 @@
       setConnectionState(false, "链接无效");
       elements.loadingList.hidden = true;
       renderLoadFailure("请向分享者获取包含访问凭证的完整链接。");
-      showAlert("共享链接不完整，缺少访问凭证。请重新扫描二维码或复制完整链接。 ");
+      showAlert("共享链接不完整，缺少访问凭证。请重新打开或复制完整链接。 ");
       setInteractionEnabled(false);
       elements.refreshButton.disabled = true;
       return;

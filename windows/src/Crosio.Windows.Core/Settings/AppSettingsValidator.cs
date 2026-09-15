@@ -19,6 +19,11 @@ public static class AppSettingsValidator
             issues.Add(new("preferredSharingPort", "out-of-range"));
         }
 
+        if (settings.CustomShareAccessCode is { } accessCode && !IsValidShareAccessCode(accessCode))
+        {
+            issues.Add(new("customShareAccessCode", "invalid-access-code"));
+        }
+
         if (settings.Hotkeys is null)
         {
             issues.Add(new("hotkeys", "missing"));
@@ -55,5 +60,26 @@ public static class AppSettingsValidator
         }
 
         return issues;
+    }
+
+    private static bool IsValidShareAccessCode(string value)
+    {
+        if (value.Length is < 6 or > 24 || !string.Equals(value, value.Trim(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (character is not (>= 'a' and <= 'z')
+                and not (>= 'A' and <= 'Z')
+                and not (>= '0' and <= '9')
+                and not '-' and not '_')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

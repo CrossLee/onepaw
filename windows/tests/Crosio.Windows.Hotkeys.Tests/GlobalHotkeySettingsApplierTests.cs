@@ -75,6 +75,22 @@ public sealed class GlobalHotkeySettingsApplierTests
         Assert.Equal(["load"], events);
     }
 
+    [Fact]
+    public async Task ApplyingHotkeysPreservesCustomShareAccessCode()
+    {
+        var events = new List<string>();
+        var previous = new AppSettings { CustomShareAccessCode = "Class-2026_A" };
+        var store = new FakeSettingsStore(previous, events);
+        var host = new FakeHost(previous.Hotkeys, events);
+        var applier = new GlobalHotkeySettingsApplier(host, store);
+
+        var result = await applier.ApplyAsync(
+            WithOptional(previous.Hotkeys, "capture-frame", "F8"));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Class-2026_A", store.Current.CustomShareAccessCode);
+    }
+
     private static IReadOnlyDictionary<string, HotkeyBinding> WithOptional(
         IReadOnlyDictionary<string, HotkeyBinding> source,
         string route,

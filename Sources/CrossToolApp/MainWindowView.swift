@@ -255,7 +255,7 @@ private struct DashboardView: View {
                 .environmentObject(model)
         }
         .sheet(isPresented: $showingQRCode) {
-            QRCodeSheet(value: model.shareURL)
+            QRCodeSheet(value: model.shareURL, accessCode: model.sessionToken)
         }
     }
 }
@@ -468,7 +468,7 @@ private struct SharingPage: View {
             ShareTextSheet().environmentObject(model)
         }
         .sheet(isPresented: $showingQRCode) {
-            QRCodeSheet(value: model.shareURL)
+            QRCodeSheet(value: model.shareURL, accessCode: model.sessionToken)
         }
     }
 }
@@ -543,6 +543,7 @@ private struct HistoryPage: View {
 private struct SettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var loginItemSettings = LoginItemSettingsModel()
+    @State private var showingAccessCodeEditor = false
 
     var body: some View {
         Form {
@@ -558,6 +559,21 @@ private struct SettingsPage: View {
             Section("共享服务") {
                 LabeledContent("默认端口", value: String(model.port))
                 LabeledContent("传输范围", value: "当前局域网")
+                LabeledContent("当前访问码") {
+                    HStack(spacing: 10) {
+                        Text(model.sessionToken)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button("修改") {
+                            showingAccessCodeEditor = true
+                        }
+                    }
+                }
+                Text(model.usesCustomShareAccessCode
+                    ? "当前使用自定义访问码。更新后旧链接和二维码会立即失效。"
+                    : "当前使用 10 位随机访问码；可改成便于课堂输入的 6–24 位自定义访问码。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Toggle("启动 App 时自动开启共享", isOn: .constant(true))
                     .disabled(true)
             }
@@ -574,6 +590,10 @@ private struct SettingsPage: View {
         }
         .formStyle(.grouped)
         .padding(24)
+        .sheet(isPresented: $showingAccessCodeEditor) {
+            ShareAccessCodeEditor(accessCode: model.sessionToken)
+                .environmentObject(model)
+        }
     }
 
     private var appVersion: String {

@@ -31,7 +31,20 @@ struct ApplicationBundleConfigurationTests {
         ), encoding: .utf8)
         #expect(html.contains("<title>一爪 · 课堂共享区</title>"))
         #expect(html.contains("由一爪提供") || html.contains("由 一爪 提供"))
+        #expect(html.contains("链接带有共享访问码"))
+        #expect(!html.contains("临时访问码"))
         #expect(!html.contains("Crosio"))
+
+        let script = try String(contentsOf: root.appendingPathComponent(
+            "Sources/CrossToolApp/Resources/Web/app.js"
+        ), encoding: .utf8)
+        #expect(script.contains("if (initial || linkExpired)"))
+        #expect(script.contains("function expireLink()"))
+        #expect(script.components(separatedBy: "expireLink();").count == 4)
+        #expect(script.contains("if (state.linkExpired) return"))
+        #expect(script.contains("state.linkExpired = true"))
+        #expect(script.contains("elements.refreshButton.disabled = !state.interactionEnabled"))
+        #expect(script.contains("等待新的共享链接"))
     }
 
     @Test("The approved OnePaw artwork is packaged as a multi-resolution application icon")

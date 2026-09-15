@@ -26,14 +26,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var mainWindowDismissRequestID = 0
     @Published private(set) var textTranslationLaunchRequest: TextTranslationLaunchRequest?
 
-    let sessionToken: String
+    @Published private(set) var sessionToken: String
+    @Published private(set) var usesCustomShareAccessCode: Bool
     let colorSampler = ColorSamplerViewModel()
     let imageCompression = ImageCompressionFeatureModel()
     let screenRecording = ScreenRecordingFeatureModel()
     @Published private(set) var port: UInt16 = 5421
 
     private let store: SharedContentStore
+    private let router: HTTPRouter
     private let server: LocalHTTPServer
+    private let defaults: UserDefaults
     private let screenshotService: ScreenshotService
     private let screenshotPasteboardWriter = ScreenshotPasteboardWriter()
     private let screenshotsDirectory: URL
@@ -48,9 +51,10 @@ final class AppModel: ObservableObject {
     private var isPreparingColorSampling = false
     private var lastClaimedMainWindowOpenRequestID = 0
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
         let directories = Self.makeDirectories()
         let shortcutLoadResult = Self.loadGlobalShortcuts()
+        let loadedAccessCode = ShareAccessCodePreferences.load(from: defaults)
         Self.removeStaleScreenshotDrafts(in: directories.drafts)
         let createdStore: SharedContentStore
         do {
@@ -61,7 +65,7 @@ final class AppModel: ObservableObject {
             createdStore = try! SharedContentStore(inboxDirectory: fallback)
         }
 
-        let token = Self.makeSessionToken()
+        let token = loadedAccessCode.value
         let web = Self.loadWebResources()
         let router = HTTPRouter(
             store: createdStore,
@@ -71,7 +75,10 @@ final class AppModel: ObservableObject {
         )
 
         self.store = createdStore
+        self.router = router
+        self.defaults = defaults
         self.sessionToken = token
+        self.usesCustomShareAccessCode = loadedAccessCode.usesCustomValue
         self.server = LocalHTTPServer(router: router, port: 5421)
         self.screenshotService = ScreenshotService(outputDirectory: directories.drafts)
         self.screenshotsDirectory = directories.screenshots
@@ -140,11 +147,24 @@ final class AppModel: ObservableObject {
 
     var shareURL: String {
         let address = LocalNetworkAddress.bestIPv4Address() ?? "127.0.0.1"
-        return "http://\(address):\(port)/?token=\(sessionToken)"
+        return ShareLinkBuilder.url(
+            host: address,
+            port: port,
+            accessCode: sessionToken
+        )?.absoluteString ?? "http://\(address):\(port)/"
     }
 
     var localPreviewURL: URL? {
-        URL(string: "http://127.0.0.1:\(port)/?token=\(sessionToken)")
+        ShareLinkBuilder.url(
+            host: "127.0.0.1",
+            port: port,
+            accessCode: sessionToken
+        )
+    }
+
+    var shareAddress: String {
+        let address = LocalNetworkAddress.bestIPv4Address() ?? "127.0.0.1"
+        return "\(address):\(port)"
     }
 
     var defaultGlobalShortcuts: [GlobalShortcutCommand: GlobalShortcut] {
@@ -373,6 +393,34 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(shareURL, forType: .string)
         notice = "共享链接已复制"
+    }
+
+    func applyShareAccessCode(_ rawValue: String) throws {
+        let previousToken = sessionToken
+        let normalizedValue = try ShareAccessCodePreferences.saveCustom(
+            rawValue,
+            to: defaults
+        )
+
+        router.updateSessionToken(normalizedValue)
+        sessionToken = normalizedValue
+        usesCustomShareAccessCode = true
+        notice = normalizedValue == previousToken
+            ? "已保存为自定义访问码"
+            : "访问码已更新，旧链接和二维码已失效"
+    }
+
+    func resetShareAccessCode() {
+        var randomValue = ShareAccessCode.makeRandom()
+        while randomValue == sessionToken {
+            randomValue = ShareAccessCode.makeRandom()
+        }
+
+        ShareAccessCodePreferences.clearCustom(from: defaults)
+        router.updateSessionToken(randomValue)
+        sessionToken = randomValue
+        usesCustomShareAccessCode = false
+        notice = "已换成新的随机访问码，旧链接和二维码已失效"
     }
 
     func openBrowserPreview() {
@@ -871,10 +919,6 @@ final class AppModel: ObservableObject {
             notice = title
             NSApp.requestUserAttention(.informationalRequest)
         }
-    }
-
-    private static func makeSessionToken() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
     private static let globalToolShortcutsDefaultsKey = "globalToolShortcuts.v1"

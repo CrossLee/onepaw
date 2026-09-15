@@ -35,7 +35,7 @@ struct MenuBarPanelView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.isServerRunning ? "共享已开启" : "共享未开启")
                         .font(.subheadline.weight(.medium))
-                    Text(model.shareURL.replacingOccurrences(of: "http://", with: "").components(separatedBy: "/").first ?? model.shareURL)
+                    Text("\(model.shareAddress) · \(model.sessionToken)")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }

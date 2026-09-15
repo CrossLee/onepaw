@@ -14,6 +14,8 @@ public sealed class AppSettings
 
     public int PreferredSharingPort { get; init; } = 5421;
 
+    public string? CustomShareAccessCode { get; init; }
+
     public IReadOnlyDictionary<string, HotkeyBinding> Hotkeys { get; init; } = CreateDefaultHotkeys();
 
     public static AppSettings Default => new();

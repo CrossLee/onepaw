@@ -84,6 +84,56 @@ func removeOutgoingFilesByURL() throws {
     #expect(!SharedContentStore.sanitizeFilename("bad\0name.txt").contains("\0"))
 }
 
+@Test func stagedUploadStaysPrivateUntilCommittedAndCanBeDiscarded() throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try SharedContentStore(inboxDirectory: root.appendingPathComponent("Inbox"))
+
+    let stagedFile = try store.stageReceivedFile(
+        data: Data("not public yet".utf8),
+        filename: "draft.txt"
+    )
+
+    #expect(store.incomingSnapshot().isEmpty)
+    #expect(store.publicSnapshot().isEmpty)
+    #expect(FileManager.default.fileExists(atPath: stagedFile.temporaryURL.path))
+
+    store.discardStagedFile(stagedFile)
+
+    #expect(!FileManager.default.fileExists(atPath: stagedFile.temporaryURL.path))
+    #expect(store.incomingSnapshot().isEmpty)
+}
+
+@Test func storeInitializationCleansOnlyStalePrivateStagingEntries() throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let inbox = root.appendingPathComponent("Inbox", isDirectory: true)
+    let staging = inbox.appendingPathComponent(".onepaw-staging", isDirectory: true)
+    try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    let orphanDirectory = staging.appendingPathComponent("old-session", isDirectory: true)
+    let activeDirectory = staging.appendingPathComponent("active-session", isDirectory: true)
+    try FileManager.default.createDirectory(at: orphanDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: activeDirectory, withIntermediateDirectories: true)
+    let orphan = orphanDirectory.appendingPathComponent("orphan.upload")
+    let active = activeDirectory.appendingPathComponent("active.upload")
+    let userFile = inbox.appendingPathComponent("keep-me.txt")
+    try Data("orphan".utf8).write(to: orphan)
+    try Data("active".utf8).write(to: active)
+    try Data("keep".utf8).write(to: userFile)
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date().addingTimeInterval(-25 * 60 * 60)],
+        ofItemAtPath: orphanDirectory.path
+    )
+
+    let store = try SharedContentStore(inboxDirectory: inbox)
+
+    #expect(!FileManager.default.fileExists(atPath: orphanDirectory.path))
+    #expect(FileManager.default.fileExists(atPath: active.path))
+    #expect(FileManager.default.fileExists(atPath: userFile.path))
+    #expect(FileManager.default.fileExists(atPath: staging.path))
+    withExtendedLifetime(store) {}
+}
+
 @Test func concurrentUploadsWithTheSameNameNeverOverwriteEachOther() async throws {
     let root = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

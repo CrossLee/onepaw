@@ -169,6 +169,129 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: try #require(received.fileURL).path))
 }
 
+@Test func routerRotatesSessionTokenWithoutRestartingOrLeakingTheNewToken() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try SharedContentStore(inboxDirectory: root.appendingPathComponent("Inbox"))
+    let source = root.appendingPathComponent("rotation.txt")
+    try Data("same shared content".utf8).write(to: source)
+    _ = try store.addSharedFile(at: source)
+    let router = HTTPRouter(
+        store: store,
+        sessionToken: "oldcode",
+        indexHTML: Data("<html>ok</html>".utf8)
+    )
+
+    let oldList = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/items?token=oldcode",
+        path: "/api/items",
+        query: ["token": "oldcode"]
+    ))
+    #expect(oldList.statusCode == 200)
+    #expect(String(data: oldList.body, encoding: .utf8)?.contains("token=oldcode") == true)
+
+    router.updateSessionToken("New_code2")
+
+    let rejectedOldList = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/items?token=oldcode",
+        path: "/api/items",
+        query: ["token": "oldcode"]
+    ))
+    #expect(rejectedOldList.statusCode == 403)
+    #expect(String(data: rejectedOldList.body, encoding: .utf8)?.contains("New_code2") == false)
+
+    let newList = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/items?token=New_code2",
+        path: "/api/items",
+        query: ["token": "New_code2"]
+    ))
+    #expect(newList.statusCode == 200)
+    #expect(String(data: newList.body, encoding: .utf8)?.contains("token=New_code2") == true)
+    #expect(store.publicSnapshot().count == 1)
+
+    let wrongCase = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/health?token=new_code2",
+        path: "/api/health",
+        query: ["token": "new_code2"]
+    ))
+    #expect(wrongCase.statusCode == 403)
+
+    let headerAuthenticated = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/health",
+        path: "/api/health",
+        headers: ["x-crosstool-token": "New_code2"]
+    ))
+    #expect(headerAuthenticated.statusCode == 200)
+}
+
+@Test func storeChangeHandlerCanRotateTokenWithoutReentrantDeadlock() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try SharedContentStore(inboxDirectory: root.appendingPathComponent("Inbox"))
+    let router = HTTPRouter(store: store, sessionToken: "oldcode", indexHTML: Data())
+    let requestFinished = DispatchSemaphore(value: 0)
+    let responseBox = HTTPResponseBox()
+
+    store.setChangeHandler {
+        router.updateSessionToken("newcode")
+    }
+
+    let textBody = try JSONSerialization.data(withJSONObject: ["text": "accepted before rotation"])
+    DispatchQueue.global(qos: .userInitiated).async {
+        let response = router.handle(HTTPRequest(
+            method: "POST",
+            target: "/api/text?token=oldcode",
+            path: "/api/text",
+            query: ["token": "oldcode"],
+            headers: ["content-type": "application/json"],
+            body: textBody
+        ))
+        responseBox.store(response)
+        requestFinished.signal()
+    }
+
+    #expect(requestFinished.wait(timeout: .now() + 5) == .success)
+    #expect(responseBox.load()?.statusCode == 201)
+    #expect(store.incomingSnapshot().count == 1)
+
+    let rejectedOldRequest = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/items?token=oldcode",
+        path: "/api/items",
+        query: ["token": "oldcode"]
+    ))
+    let acceptedNewRequest = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/api/items?token=newcode",
+        path: "/api/items",
+        query: ["token": "newcode"]
+    ))
+    #expect(rejectedOldRequest.statusCode == 403)
+    #expect(acceptedNewRequest.statusCode == 200)
+}
+
+private final class HTTPResponseBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var response: HTTPResponse?
+
+    func store(_ response: HTTPResponse) {
+        lock.lock()
+        self.response = response
+        lock.unlock()
+    }
+
+    func load() -> HTTPResponse? {
+        lock.lock()
+        defer { lock.unlock() }
+        return response
+    }
+}
+
 private func temporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("crosstool-router-tests-\(UUID().uuidString)", isDirectory: true)

@@ -240,6 +240,15 @@ public partial class App : Application
                 return;
             }
 
+            await _featureServices.SharingAccessCodes.InitializeAsync(
+                settings,
+                _shutdownCancellation.Token);
+
+            if (IsExiting)
+            {
+                return;
+            }
+
             var hotkeys = _featureServices.GlobalHotkeys;
             hotkeys.Pressed += OnGlobalHotkeyPressed;
             var hotkeyResult = hotkeys.ReplaceBindings(settings.Hotkeys);

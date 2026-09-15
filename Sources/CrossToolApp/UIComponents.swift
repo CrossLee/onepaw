@@ -26,6 +26,7 @@ struct PageHeader: View {
 struct SharingStatusCard: View {
     @EnvironmentObject private var model: AppModel
     @Binding var showingQRCode: Bool
+    @State private var showingAccessCodeEditor = false
 
     var body: some View {
         HStack(spacing: 16) {
@@ -35,11 +36,22 @@ struct SharingStatusCard: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(statusTitle)
                     .font(.headline)
-                Text(model.shareURL)
-                    .font(.system(.subheadline, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(1)
+                HStack(spacing: 7) {
+                    Text(model.shareAddress)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Text("访问码 \(model.sessionToken)")
+                    Button("修改") {
+                        showingAccessCodeEditor = true
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.crossToolAccent)
+                    .accessibilityLabel("修改共享访问码")
+                }
+                .font(.system(.subheadline, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .lineLimit(1)
             }
             Spacer(minLength: 20)
             Button("复制链接", systemImage: "link") { model.copyShareLink() }
@@ -57,6 +69,10 @@ struct SharingStatusCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.crossToolBorder, lineWidth: 1)
+        }
+        .sheet(isPresented: $showingAccessCodeEditor) {
+            ShareAccessCodeEditor(accessCode: model.sessionToken)
+                .environmentObject(model)
         }
     }
 
@@ -307,6 +323,12 @@ struct ShareTextSheet: View {
 struct QRCodeSheet: View {
     @Environment(\.dismiss) private var dismiss
     let value: String
+    let accessCode: String?
+
+    init(value: String, accessCode: String? = nil) {
+        self.value = value
+        self.accessCode = accessCode
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -325,6 +347,11 @@ struct QRCodeSheet: View {
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            if let accessCode {
+                Text("访问码：\(accessCode)")
+                    .font(.system(.callout, design: .monospaced, weight: .semibold))
+                    .textSelection(.enabled)
+            }
             Text("请确保设备连接到同一局域网")
                 .font(.caption)
                 .foregroundStyle(.secondary)

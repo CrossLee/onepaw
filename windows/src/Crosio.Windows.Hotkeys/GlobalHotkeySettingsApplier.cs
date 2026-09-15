@@ -93,6 +93,7 @@ public sealed class GlobalHotkeySettingsApplier
             StartWithWindows = source.StartWithWindows,
             RunInBackground = source.RunInBackground,
             PreferredSharingPort = source.PreferredSharingPort,
+            CustomShareAccessCode = source.CustomShareAccessCode,
             Hotkeys = hotkeys.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value,

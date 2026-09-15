@@ -191,6 +191,22 @@
 
                 <StackPanel x:Name="SharingPanel" Spacing="12" Visibility="Collapsed">
                     <TextBlock Text="同一局域网内可用浏览器收发文件和文字；只有当前一爪可以停止共享。" TextWrapping="Wrap" />
+                    <TextBlock Text="共享访问码" FontWeight="SemiBold" />
+                    <TextBox
+                        x:Name="SharingAccessCodeBox"
+                        MaxLength="24"
+                        PlaceholderText="6–24 位英文字母、数字、- 或 _" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            Content="保存并更新链接"
+                            Click="SaveSharingAccessCode_Click"
+                            Style="{StaticResource AccentButtonStyle}" />
+                        <Button Content="换一个随机访问码" Click="ResetSharingAccessCode_Click" />
+                    </StackPanel>
+                    <TextBlock
+                        x:Name="SharingAccessCodeStatusText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
                     <TextBox
                         x:Name="SharedTextInput"
                         AcceptsReturn="True"
@@ -221,6 +237,28 @@
                         Toggled="StartWithWindowsToggle_Toggled" />
                     <TextBlock
                         x:Name="StartupStatusText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <TextBlock Text="共享服务" FontWeight="SemiBold" />
+                    <TextBox
+                        x:Name="SettingsShareAccessCodeBox"
+                        Header="共享访问码"
+                        MaxLength="24"
+                        PlaceholderText="6–24 位英文字母、数字、- 或 _" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            Content="保存访问码"
+                            Tag="settings"
+                            Click="SaveSharingAccessCode_Click" />
+                        <Button Content="恢复随机访问码" Click="ResetSharingAccessCode_Click" />
+                    </StackPanel>
+                    <TextBlock
+                        x:Name="SettingsShareAccessCodeStatusText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        Text="访问码会明文出现在共享链接和浏览器历史中，只用于限制误访问，不等同于加密密码。建议至少 8 位，避免连续或重复数字。"
+                        FontSize="12"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
                     <TextBlock Text="全局快捷键" FontWeight="SemiBold" />

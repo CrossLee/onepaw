@@ -81,17 +81,37 @@ public sealed class SharedContentStore
         string text,
         string? remoteAddress,
         CancellationToken cancellationToken = default)
+        => await ReceiveTextAsync(text, remoteAddress, tryCommit: null, cancellationToken)
+            .ConfigureAwait(false);
+
+    internal async Task<SharedItem> ReceiveTextAsync(
+        string text,
+        string? remoteAddress,
+        Func<Action, bool>? tryCommit,
+        CancellationToken cancellationToken = default)
     {
         var cleaned = RequireText(text);
         var item = CreateTextItem(cleaned, SharedItemDirection.Incoming, remoteAddress);
         await _inboxIoGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            lock (_gate)
+            void Commit()
             {
-                EnsureIncomingCapacityLocked(item.ByteCount ?? 0, isText: true);
-                _hiddenIncomingItemIds.Remove(item.Id);
-                _incomingItems.Insert(0, item);
+                lock (_gate)
+                {
+                    EnsureIncomingCapacityLocked(item.ByteCount ?? 0, isText: true);
+                    _hiddenIncomingItemIds.Remove(item.Id);
+                    _incomingItems.Insert(0, item);
+                }
+            }
+
+            if (tryCommit is null)
+            {
+                Commit();
+            }
+            else if (!tryCommit(Commit))
+            {
+                throw new SharingAccessExpiredException();
             }
         }
         finally
@@ -107,6 +127,22 @@ public sealed class SharedContentStore
         string filename,
         long? declaredLength,
         string? remoteAddress,
+        CancellationToken cancellationToken = default)
+        => await ReceiveFileAsync(
+                source,
+                filename,
+                declaredLength,
+                remoteAddress,
+                tryCommit: null,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    internal async Task<SharedItem> ReceiveFileAsync(
+        Stream source,
+        string filename,
+        long? declaredLength,
+        string? remoteAddress,
+        Func<Action, bool>? tryCommit,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -151,11 +187,6 @@ public sealed class SharedContentStore
                 throw new SharedContentException("不能接收空文件");
             }
 
-            EnsureSafeInboxDirectory();
-            EnsureImmediateInboxChild(destination);
-            File.Move(temporaryPath, destination);
-            temporaryPath = null;
-
             receivedItem = new SharedItem(
                 Guid.NewGuid(),
                 MimeTypes.KindForFile(destination),
@@ -167,11 +198,31 @@ public sealed class SharedContentStore
                 MimeTypes.ForFile(destination),
                 DateTimeOffset.UtcNow,
                 remoteAddress);
+            var stagedPath = temporaryPath
+                ?? throw new InvalidOperationException("上传暂存文件尚未创建");
+            var itemToCommit = receivedItem
+                ?? throw new InvalidOperationException("接收文件条目尚未创建");
 
-            lock (_gate)
+            void Commit()
             {
-                _hiddenIncomingItemIds.Remove(receivedItem.Id);
-                _incomingItems.Insert(0, receivedItem);
+                EnsureSafeInboxDirectory();
+                EnsureImmediateInboxChild(destination);
+                File.Move(stagedPath, destination);
+                temporaryPath = null;
+                lock (_gate)
+                {
+                    _hiddenIncomingItemIds.Remove(itemToCommit.Id);
+                    _incomingItems.Insert(0, itemToCommit);
+                }
+            }
+
+            if (tryCommit is null)
+            {
+                Commit();
+            }
+            else if (!tryCommit(Commit))
+            {
+                throw new SharingAccessExpiredException();
             }
         }
         finally
@@ -529,4 +580,8 @@ public sealed class SharedContentStore
     }
 
     private sealed record ReceiveBudget(long MaximumUploadBytes, long QuotaBytes, long DiskBytes);
+}
+
+internal sealed class SharingAccessExpiredException : Exception
+{
 }

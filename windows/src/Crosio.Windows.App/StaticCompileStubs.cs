@@ -37,11 +37,15 @@ public sealed partial class MainWindow
     private readonly Button CopyTranslationButton = new();
     private readonly StackPanel CompressionPanel = new();
     private readonly StackPanel SharingPanel = new();
+    private readonly TextBox SharingAccessCodeBox = new();
+    private readonly TextBlock SharingAccessCodeStatusText = new();
     private readonly TextBox SharedTextInput = new();
     private readonly TextBlock SharingSummary = new();
     private readonly StackPanel SettingsPanel = new();
     private readonly ToggleSwitch StartWithWindowsToggle = new();
     private readonly TextBlock StartupStatusText = new();
+    private readonly TextBox SettingsShareAccessCodeBox = new();
+    private readonly TextBlock SettingsShareAccessCodeStatusText = new();
     private readonly ListView HotkeyList = new();
     private readonly TextBlock ShortcutStatusText = new();
     private readonly Button RestoreDefaultHotkeysButton = new();

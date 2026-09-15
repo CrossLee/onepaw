@@ -28,11 +28,14 @@ public sealed class LocalSharingServer : IAsyncDisposable
     private const long MaximumTextRequestBytes = SharedContentStore.MaximumTextBytes * 6L + 1024;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _uploadGate = new(1, 1);
+    private readonly object _credentialConfigurationGate = new();
     private readonly SharedContentStore _store;
     private readonly IPAddress _listenAddress;
-    private readonly bool _usesFixedSessionToken;
     private readonly ILocalSharingApplicationFactory? _applicationFactory;
     private readonly IUploadProcessingObserver? _uploadObserver;
+    private CredentialAuthority _credentialAuthority;
+    private string _sessionToken;
+    private bool _usesCustomAccessCode;
     private ApplicationLease? _application;
     private bool _disposeRequested;
     private bool _disposed;
@@ -72,24 +75,72 @@ public sealed class LocalSharingServer : IAsyncDisposable
         PreferredPort = preferredPort;
         MaximumPortAttempts = Math.Max(1, maximumPortAttempts);
         _listenAddress = listenAddress ?? IPAddress.Any;
-        _usesFixedSessionToken = sessionToken is not null;
-        SessionToken = sessionToken ?? CreateSessionToken();
+        _usesCustomAccessCode = sessionToken is not null;
+        _sessionToken = sessionToken is null
+            ? ShareAccessCode.CreateRandom()
+            : ShareAccessCode.NormalizeCustom(sessionToken);
+        _credentialAuthority = new CredentialAuthority(_sessionToken);
         _applicationFactory = applicationFactory;
         _uploadObserver = uploadObserver;
     }
 
     public int PreferredPort { get; }
     public int MaximumPortAttempts { get; }
-    public string SessionToken { get; private set; }
+    public string SessionToken
+    {
+        get
+        {
+            lock (_credentialConfigurationGate)
+            {
+                return _sessionToken;
+            }
+        }
+    }
+
+    public bool UsesCustomAccessCode
+    {
+        get
+        {
+            lock (_credentialConfigurationGate)
+            {
+                return _usesCustomAccessCode;
+            }
+        }
+    }
     public SharingServerState State { get; private set; } = new(SharingServerStatus.Stopped, null, null);
 
     public event EventHandler<SharingServerState>? StateChanged;
 
-    public IReadOnlyList<Uri> SharingUris => State is { Status: SharingServerStatus.Running, Port: { } port }
-        ? LocalNetworkAddresses.GetUsableIPv4Addresses()
-            .Select(address => new Uri($"http://{address}:{port}/?token={Uri.EscapeDataString(SessionToken)}"))
-            .ToArray()
-        : [];
+    public IReadOnlyList<Uri> SharingUris
+    {
+        get
+        {
+            var state = State;
+            if (state is not { Status: SharingServerStatus.Running, Port: { } port })
+            {
+                return [];
+            }
+
+            var token = SessionToken;
+            return LocalNetworkAddresses.GetUsableIPv4Addresses()
+                .Select(address => new Uri($"http://{address}:{port}/?token={Uri.EscapeDataString(token)}"))
+                .ToArray();
+        }
+    }
+
+    public Task UpdateSessionTokenAsync(
+        string sessionToken,
+        CancellationToken cancellationToken = default) =>
+        SetSessionTokenAsync(
+            ShareAccessCode.NormalizeCustom(sessionToken),
+            usesCustomAccessCode: true,
+            cancellationToken);
+
+    public Task ResetSessionTokenAsync(CancellationToken cancellationToken = default) =>
+        SetSessionTokenAsync(
+            ShareAccessCode.CreateRandom(),
+            usesCustomAccessCode: false,
+            cancellationToken);
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -107,7 +158,12 @@ public sealed class LocalSharingServer : IAsyncDisposable
                 throw new InvalidOperationException("共享服务仍有未完成的清理，请先重试停止服务");
             }
 
-            var candidateToken = _usesFixedSessionToken ? SessionToken : CreateSessionToken();
+            string candidateToken;
+            lock (_credentialConfigurationGate)
+            {
+                candidateToken = _sessionToken;
+            }
+            var candidateAuthority = new CredentialAuthority(candidateToken);
             UpdateState(new SharingServerState(SharingServerStatus.Starting, null, null));
             Exception? lastError = null;
             for (var attempt = 0; attempt < MaximumPortAttempts; attempt++)
@@ -135,7 +191,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
                 {
                     if (application is WebApplicationAdapter webApplication)
                     {
-                        ConfigureRoutes(webApplication.Application, candidateToken);
+                        ConfigureRoutes(webApplication.Application, candidateAuthority);
                     }
                     await application.StartAsync(cancellationToken).ConfigureAwait(false);
                 }
@@ -168,7 +224,11 @@ public sealed class LocalSharingServer : IAsyncDisposable
 
                 lease.MarkStarted();
                 _application = lease;
-                SessionToken = candidateToken;
+                lock (_credentialConfigurationGate)
+                {
+                    _sessionToken = candidateToken;
+                    _credentialAuthority = candidateAuthority;
+                }
                 UpdateState(new SharingServerState(SharingServerStatus.Running, port, null));
                 return;
             }
@@ -247,6 +307,33 @@ public sealed class LocalSharingServer : IAsyncDisposable
         UpdateState(new SharingServerState(SharingServerStatus.Stopped, null, null));
     }
 
+    private async Task SetSessionTokenAsync(
+        string sessionToken,
+        bool usesCustomAccessCode,
+        CancellationToken cancellationToken)
+    {
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed || _disposeRequested, this);
+            lock (_credentialConfigurationGate)
+            {
+                if (!string.Equals(_sessionToken, sessionToken, StringComparison.Ordinal))
+                {
+                    _credentialAuthority.Update(sessionToken);
+                    _sessionToken = sessionToken;
+                }
+                _usesCustomAccessCode = usesCustomAccessCode;
+            }
+
+            StateChanged?.Invoke(this, State);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     private ILocalSharingApplication BuildApplication(int port)
     {
         var options = new WebApplicationOptions
@@ -270,7 +357,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
         return new WebApplicationAdapter(builder.Build());
     }
 
-    private void ConfigureRoutes(WebApplication application, string sessionToken)
+    private void ConfigureRoutes(WebApplication application, CredentialAuthority credentialAuthority)
     {
         var assets = new WebAssets();
 
@@ -285,9 +372,11 @@ public sealed class LocalSharingServer : IAsyncDisposable
 
         application.MapGet("/app.css", () => EmbeddedAsset(assets, "app.css", "text/css; charset=utf-8"));
         application.MapGet("/app.js", () => EmbeddedAsset(assets, "app.js", "text/javascript; charset=utf-8"));
+        application.MapGet("/assets/app.css", () => EmbeddedAsset(assets, "app.css", "text/css; charset=utf-8"));
+        application.MapGet("/assets/app.js", () => EmbeddedAsset(assets, "app.js", "text/javascript; charset=utf-8"));
         application.MapGet("/", async (HttpContext context, CancellationToken cancellationToken) =>
         {
-            if (!IsAuthorized(context.Request, sessionToken))
+            if (!TryAuthorize(context.Request, credentialAuthority, out _))
             {
                 return Results.Content(UnauthorizedHtml, "text/html; charset=utf-8", Encoding.UTF8, 403);
             }
@@ -299,18 +388,18 @@ public sealed class LocalSharingServer : IAsyncDisposable
         });
 
         application.MapGet("/api/health", (HttpRequest request) =>
-            IsAuthorized(request, sessionToken)
+            TryAuthorize(request, credentialAuthority, out _)
                 ? Results.Json(new { ok = true })
                 : UnauthorizedJson());
 
         application.MapGet("/api/items", (HttpRequest request) =>
         {
-            if (!IsAuthorized(request, sessionToken))
+            if (!TryAuthorize(request, credentialAuthority, out var credential))
             {
                 return UnauthorizedJson();
             }
 
-            var encodedToken = Uri.EscapeDataString(sessionToken);
+            var encodedToken = Uri.EscapeDataString(credential.Token);
             var items = _store.PublicSnapshot().Select(item => new
             {
                 id = item.Id,
@@ -328,7 +417,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
 
         application.MapPost("/api/text", async (HttpRequest request, CancellationToken cancellationToken) =>
         {
-            if (!IsAuthorized(request, sessionToken))
+            if (!TryAuthorize(request, credentialAuthority, out var credential))
             {
                 return UnauthorizedJson();
             }
@@ -350,6 +439,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
                 var item = await _store.ReceiveTextAsync(
                     payload?.Text ?? string.Empty,
                     request.HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    commit => credentialAuthority.TryCommit(credential, commit),
                     cancellationToken).ConfigureAwait(false);
                 return Results.Json(new { ok = true, id = item.Id, name = item.Title }, statusCode: 201);
             }
@@ -365,11 +455,15 @@ public sealed class LocalSharingServer : IAsyncDisposable
             {
                 return ErrorJson("文字内容过长", 413);
             }
+            catch (SharingAccessExpiredException)
+            {
+                return UnauthorizedJson();
+            }
         });
 
         application.MapPost("/api/upload", async (HttpRequest request, CancellationToken cancellationToken) =>
         {
-            if (!IsAuthorized(request, sessionToken))
+            if (!TryAuthorize(request, credentialAuthority, out var credential))
             {
                 return UnauthorizedJson();
             }
@@ -397,6 +491,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
                     file.FileName,
                     file.Length,
                     request.HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    commit => credentialAuthority.TryCommit(credential, commit),
                     cancellationToken).ConfigureAwait(false);
                 return Results.Json(new { ok = true, id = item.Id, name = item.Title }, statusCode: 201);
             }
@@ -407,6 +502,10 @@ public sealed class LocalSharingServer : IAsyncDisposable
             catch (InvalidDataException)
             {
                 return ErrorJson("上传请求格式不正确", 400);
+            }
+            catch (SharingAccessExpiredException)
+            {
+                return UnauthorizedJson();
             }
             finally
             {
@@ -426,7 +525,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
 
         application.MapGet("/download/{id:guid}", (HttpRequest request, Guid id) =>
         {
-            if (!IsAuthorized(request, sessionToken))
+            if (!TryAuthorize(request, credentialAuthority, out var credential))
             {
                 return UnauthorizedJson();
             }
@@ -434,6 +533,11 @@ public sealed class LocalSharingServer : IAsyncDisposable
             if (item?.FilePath is null || !File.Exists(item.FilePath))
             {
                 return ErrorJson("文件不存在或已经取消分享", 404);
+            }
+
+            if (!credentialAuthority.IsCurrent(credential))
+            {
+                return UnauthorizedJson();
             }
 
             return Results.File(
@@ -448,8 +552,12 @@ public sealed class LocalSharingServer : IAsyncDisposable
     private static IResult EmbeddedAsset(WebAssets assets, string name, string contentType) =>
         Results.Stream(assets.Open(name), contentType);
 
-    private static bool IsAuthorized(HttpRequest request, string sessionToken)
+    private static bool TryAuthorize(
+        HttpRequest request,
+        CredentialAuthority credentialAuthority,
+        out Credential credential)
     {
+        credential = credentialAuthority.Snapshot();
         var candidate = request.Query["token"].FirstOrDefault()
             ?? request.Headers["X-Crosstool-Token"].FirstOrDefault();
         if (candidate is null)
@@ -458,7 +566,7 @@ public sealed class LocalSharingServer : IAsyncDisposable
         }
 
         var candidateBytes = Encoding.UTF8.GetBytes(candidate);
-        var tokenBytes = Encoding.UTF8.GetBytes(sessionToken);
+        var tokenBytes = Encoding.UTF8.GetBytes(credential.Token);
         return candidateBytes.Length == tokenBytes.Length &&
             CryptographicOperations.FixedTimeEquals(candidateBytes, tokenBytes);
     }
@@ -478,9 +586,6 @@ public sealed class LocalSharingServer : IAsyncDisposable
 
     private static IResult ErrorJson(string error, int statusCode) =>
         Results.Json(new { ok = false, error }, statusCode: statusCode);
-
-    private static string CreateSessionToken() =>
-        Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
 
     private void UpdateState(SharingServerState state)
     {
@@ -528,6 +633,47 @@ public sealed class LocalSharingServer : IAsyncDisposable
     }
 
     private sealed record TextRequest(string Text);
+
+    private sealed record Credential(string Token, long Generation);
+
+    private sealed class CredentialAuthority
+    {
+        private readonly object _gate = new();
+        private Credential _credential;
+
+        public CredentialAuthority(string token)
+        {
+            _credential = new Credential(token, 0);
+        }
+
+        public Credential Snapshot() => Volatile.Read(ref _credential);
+
+        public bool IsCurrent(Credential expected) =>
+            ReferenceEquals(Snapshot(), expected);
+
+        public void Update(string token)
+        {
+            lock (_gate)
+            {
+                _credential = new Credential(token, checked(_credential.Generation + 1));
+            }
+        }
+
+        public bool TryCommit(Credential expected, Action commit)
+        {
+            ArgumentNullException.ThrowIfNull(commit);
+            lock (_gate)
+            {
+                if (!ReferenceEquals(_credential, expected))
+                {
+                    return false;
+                }
+
+                commit();
+                return true;
+            }
+        }
+    }
 
     private const string UnauthorizedHtml = """
         <!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

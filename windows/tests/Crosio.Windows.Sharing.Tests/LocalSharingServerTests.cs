@@ -66,10 +66,67 @@ public sealed class LocalSharingServerTests : IAsyncLifetime
         Assert.Contains("由一爪提供", html.Replace(" ", ""), StringComparison.Ordinal);
         Assert.DoesNotContain("Crosio", html, StringComparison.Ordinal);
         Assert.Contains("app.js", html, StringComparison.Ordinal);
+
+        using var script = await _client.GetAsync("/assets/app.js");
+        using var stylesheet = await _client.GetAsync("/assets/app.css");
+        Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, stylesheet.StatusCode);
     }
 
     [Fact]
-    public async Task RestartRotatesProductionSessionToken()
+    public async Task RuntimeAccessCodeChangeKeepsPortAndContentButExpiresOldLinks()
+    {
+        var sharedFile = Path.Combine(_root, "lesson.txt");
+        await File.WriteAllTextAsync(sharedFile, "lesson");
+        var item = _store.AddSharedFile(sharedFile);
+        var port = _server.State.Port;
+
+        await _server.UpdateSessionTokenAsync("Class-2026_A");
+
+        Assert.Equal(port, _server.State.Port);
+        Assert.Equal("Class-2026_A", _server.SessionToken);
+        Assert.True(_server.UsesCustomAccessCode);
+        using var oldRoot = await _client.GetAsync("/?token=test-token");
+        using var oldList = await _client.GetAsync("/api/items?token=test-token");
+        using var oldDownload = await _client.GetAsync($"/download/{item.Id}?token=test-token");
+        using var oldText = await _client.PostAsJsonAsync(
+            "/api/text?token=test-token",
+            new { text = "must not commit" });
+        using var oldUploadContent = Multipart([1], "old.bin");
+        using var oldUpload = await _client.PostAsync(
+            "/api/upload?token=test-token",
+            oldUploadContent);
+        using var wrongCase = await _client.GetAsync("/api/items?token=class-2026_A");
+        using var newRoot = await _client.GetAsync("/?token=Class-2026_A");
+        using var newList = await _client.GetAsync("/api/items?token=Class-2026_A");
+        using var newDownload = await _client.GetAsync($"/download/{item.Id}?token=Class-2026_A");
+
+        Assert.Equal(HttpStatusCode.Forbidden, oldRoot.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, oldList.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, oldDownload.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, oldText.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, oldUpload.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, wrongCase.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, newRoot.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, newList.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, newDownload.StatusCode);
+        Assert.Equal("lesson", await newDownload.Content.ReadAsStringAsync());
+
+        var json = await newList.Content.ReadFromJsonAsync<JsonElement>();
+        var listed = Assert.Single(json.GetProperty("items").EnumerateArray());
+        Assert.Contains(
+            "token=Class-2026_A",
+            listed.GetProperty("downloadURL").GetString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "test-token",
+            listed.GetProperty("downloadURL").GetString(),
+            StringComparison.Ordinal);
+        Assert.Single(_store.PublicSnapshot());
+    }
+
+    [Fact]
+    public async Task StopAndStartKeepsCurrentProcessAccessCode()
     {
         var directory = Path.Combine(_root, "rotating-session");
         await using var server = new LocalSharingServer(
@@ -80,10 +137,38 @@ public sealed class LocalSharingServerTests : IAsyncLifetime
 
         await server.StartAsync();
         var first = server.SessionToken;
+        Assert.Equal(ShareAccessCode.DefaultRandomLength, first.Length);
         await server.StopAsync();
         await server.StartAsync();
 
-        Assert.NotEqual(first, server.SessionToken);
+        Assert.Equal(first, server.SessionToken);
+        Assert.Equal(ShareAccessCode.DefaultRandomLength, server.SessionToken.Length);
+    }
+
+    [Fact]
+    public async Task CustomAccessCodeSurvivesStopAndStartUntilRandomModeIsRestored()
+    {
+        var directory = Path.Combine(_root, "custom-session");
+        await using var server = new LocalSharingServer(
+            new SharedContentStore(directory),
+            FindAvailablePort(),
+            maximumPortAttempts: 2,
+            IPAddress.Loopback);
+
+        await server.UpdateSessionTokenAsync("My_Class-88");
+        await server.StartAsync();
+        await server.StopAsync();
+        await server.StartAsync();
+
+        Assert.Equal("My_Class-88", server.SessionToken);
+
+        await server.ResetSessionTokenAsync();
+        var firstRandom = server.SessionToken;
+        Assert.False(server.UsesCustomAccessCode);
+        await server.StopAsync();
+        await server.StartAsync();
+
+        Assert.Equal(firstRandom, server.SessionToken);
     }
 
     public async Task DisposeAsync()
@@ -103,6 +188,13 @@ public sealed class LocalSharingServerTests : IAsyncLifetime
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static MultipartFormDataContent Multipart(byte[] bytes, string filename)
+    {
+        var multipart = new MultipartFormDataContent();
+        multipart.Add(new ByteArrayContent(bytes), "file", filename);
+        return multipart;
     }
 }
 
@@ -158,7 +250,7 @@ public sealed class LocalSharingServerLifecycleTests : IDisposable
 
         await server.StartAsync();
         Assert.Equal(1, replacement.StartCount);
-        Assert.NotEqual(publishedToken, server.SessionToken);
+        Assert.Equal(publishedToken, server.SessionToken);
         await server.DisposeAsync();
     }
 
@@ -380,6 +472,47 @@ public sealed class LocalSharingServerCapacityTests : IDisposable
         Assert.Equal(HttpStatusCode.Created, secondResponse.StatusCode);
         Assert.Equal(2, observer.EnterCount);
         Assert.Equal(1, observer.MaximumActive);
+    }
+
+    [Fact]
+    public async Task UploadThatCrossesAccessCodeChangeDoesNotCommitAndCleansTemporaryFile()
+    {
+        var observer = new ConcurrentUploadObserver();
+        var store = CreateStore(maximumInboxBytes: 100);
+        await using var server = CreateServer(store, observer);
+        await server.StartAsync();
+        using var client = ClientFor(server);
+        using var slowContent = new BlockingMultipartContent("expired.bin");
+
+        var request = client.PostAsync("/api/upload?token=test-token", slowContent);
+        await observer.FirstEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await server.UpdateSessionTokenAsync("New-Code_2");
+        slowContent.Release.SetResult();
+        using var response = await request;
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Empty(store.PublicSnapshot());
+        Assert.Empty(Directory.EnumerateFileSystemEntries(store.InboxDirectory));
+    }
+
+    [Fact]
+    public async Task SavingUnchangedAccessCodeDoesNotInvalidateUploadInProgress()
+    {
+        var observer = new ConcurrentUploadObserver();
+        var store = CreateStore(maximumInboxBytes: 100);
+        await using var server = CreateServer(store, observer);
+        await server.StartAsync();
+        using var client = ClientFor(server);
+        using var slowContent = new BlockingMultipartContent("same-code.bin");
+
+        var request = client.PostAsync("/api/upload?token=test-token", slowContent);
+        await observer.FirstEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await server.UpdateSessionTokenAsync("test-token");
+        slowContent.Release.SetResult();
+        using var response = await request;
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Single(store.PublicSnapshot());
     }
 
     public void Dispose()
