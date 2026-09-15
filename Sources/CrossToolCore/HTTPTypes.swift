@@ -73,13 +73,34 @@ public struct HTTPResponse: Sendable {
 
         var lines = ["HTTP/1.1 \(statusCode) \(Self.reasonPhrase(for: statusCode))"]
         for key in allHeaders.keys.sorted() {
-            if let value = allHeaders[key] {
+            if let value = allHeaders[key],
+               Self.isValidHeaderName(key),
+               Self.isValidHeaderValue(value) {
                 lines.append("\(key): \(value)")
             }
         }
         lines.append("")
         lines.append("")
         return Data(lines.joined(separator: "\r\n").utf8)
+    }
+
+    private static func isValidHeaderName(_ name: String) -> Bool {
+        guard !name.isEmpty else { return false }
+        let allowedPunctuation = "!#$%&'*+-.^_`|~"
+        return name.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 48...57, 65...90, 97...122:
+                return true
+            default:
+                return scalar.isASCII && allowedPunctuation.unicodeScalars.contains(scalar)
+            }
+        }
+    }
+
+    private static func isValidHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 9 || scalar.value >= 32 && scalar.value != 127
+        }
     }
 
     private static func reasonPhrase(for statusCode: Int) -> String {

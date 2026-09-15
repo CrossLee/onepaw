@@ -501,7 +501,8 @@ private struct InboxPage: View {
                         ForEach(model.receivedItems) { item in
                             SharedItemRow(
                                 item: item,
-                                showsRemove: model.publicItems.contains(where: { $0.id == item.id })
+                                showsRemove: model.publicItems.contains(where: { $0.id == item.id }),
+                                showsPublish: !model.publicItems.contains(where: { $0.id == item.id })
                             )
                             if item.id != model.receivedItems.last?.id { Divider() }
                         }
@@ -519,7 +520,7 @@ private struct HistoryPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                PageHeader(title: "历史记录", subtitle: "当前运行期间分享和接收的全部内容")
+                PageHeader(title: "历史记录", subtitle: "保存在本机的分享和接收记录")
                 ContentSection(title: "全部记录") {
                     let items = (model.sharedItems + model.receivedItems).sorted { $0.createdAt > $1.createdAt }
                     if items.isEmpty {
@@ -528,7 +529,9 @@ private struct HistoryPage: View {
                         ForEach(items) { item in
                             SharedItemRow(
                                 item: item,
-                                showsRemove: model.publicItems.contains(where: { $0.id == item.id })
+                                showsRemove: model.publicItems.contains(where: { $0.id == item.id }),
+                                showsPublish: item.direction == .incoming
+                                    && !model.publicItems.contains(where: { $0.id == item.id })
                             )
                             if item.id != items.last?.id { Divider() }
                         }

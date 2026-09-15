@@ -244,14 +244,14 @@ public final class HTTPRouter: @unchecked Sendable {
     ) -> HTTPResponse {
         guard isCurrent(credential) else { return expiredLinkResponse() }
         let idText = String(path.dropFirst("/download/".count))
-        guard let id = UUID(uuidString: idText),
-              let item = store.publicItem(id: id),
-              let fileURL = item.fileURL else {
+        guard let id = UUID(uuidString: idText) else {
             return errorResponse("文件不存在或已经取消分享", statusCode: 404)
         }
 
         do {
-            let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            let payload = try store.readPublicFile(id: id)
+            let item = payload.item
+            let data = payload.data
             guard isCurrent(credential) else { return expiredLinkResponse() }
             var responseData = data
             var statusCode = 200
@@ -268,6 +268,8 @@ public final class HTTPRouter: @unchecked Sendable {
                 headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(data.count)"
             }
             return HTTPResponse(statusCode: statusCode, headers: headers, body: responseData)
+        } catch SharedContentStoreError.itemNotFound {
+            return errorResponse("文件不存在或已经取消分享", statusCode: 404)
         } catch {
             return errorResponse("无法读取共享文件", statusCode: 500)
         }

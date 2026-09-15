@@ -169,6 +169,52 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: try #require(received.fileURL).path))
 }
 
+@Test func incomingSymlinkReplacementCannotBeDownloaded() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try SharedContentStore(inboxDirectory: root.appendingPathComponent("Inbox"))
+    let received = try store.receiveFile(
+        data: Data("student".utf8),
+        filename: "answer.txt",
+        remoteAddress: nil
+    )
+    let receivedURL = try #require(received.fileURL)
+    let outside = root.appendingPathComponent("outside-secret.txt")
+    try Data("must not leak".utf8).write(to: outside)
+    try FileManager.default.removeItem(at: receivedURL)
+    try FileManager.default.createSymbolicLink(at: receivedURL, withDestinationURL: outside)
+
+    let router = HTTPRouter(store: store, sessionToken: "secret", indexHTML: Data())
+    let response = router.handle(HTTPRequest(
+        method: "GET",
+        target: "/download/\(received.id)?token=secret",
+        path: "/download/\(received.id)",
+        query: ["token": "secret"]
+    ))
+
+    #expect(response.statusCode == 404)
+    #expect(!response.body.elementsEqual(Data("must not leak".utf8)))
+    #expect(store.publicItem(id: received.id) == nil)
+}
+
+@Test func responseSerializationDropsUnsafeHeaderNamesAndValues() throws {
+    let response = HTTPResponse(
+        statusCode: 200,
+        headers: [
+            "X-Safe": "yes",
+            "X-Bad\r\nInjected": "ignored",
+            "X-Also-Bad": "safe\r\nInjected: no",
+        ],
+        body: Data("ok".utf8)
+    )
+    let head = try #require(String(data: response.serializedHead(), encoding: .utf8))
+
+    #expect(head.contains("X-Safe: yes\r\n"))
+    #expect(!head.contains("X-Bad"))
+    #expect(!head.contains("X-Also-Bad"))
+    #expect(!head.contains("Injected"))
+}
+
 @Test func routerRotatesSessionTokenWithoutRestartingOrLeakingTheNewToken() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

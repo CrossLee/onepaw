@@ -57,12 +57,31 @@ final class AppModel: ObservableObject {
         let loadedAccessCode = ShareAccessCodePreferences.load(from: defaults)
         Self.removeStaleScreenshotDrafts(in: directories.drafts)
         let createdStore: SharedContentStore
+        var storageConflict = false
+        var fallbackRoot: URL?
+        var storeInitializationWarning: String?
         do {
             createdStore = try SharedContentStore(inboxDirectory: directories.inbox)
+        } catch SharedContentStoreError.storageInUse {
+            storageConflict = true
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "onepaw-secondary-launch-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            fallbackRoot = root
+            createdStore = try! SharedContentStore(
+                inboxDirectory: root.appendingPathComponent("Inbox", isDirectory: true)
+            )
         } catch {
             let fallback = FileManager.default.temporaryDirectory
-                .appendingPathComponent("crosstool-inbox", isDirectory: true)
+                .appendingPathComponent(
+                    "onepaw-fallback-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+                .appendingPathComponent("Inbox", isDirectory: true)
             createdStore = try! SharedContentStore(inboxDirectory: fallback)
+            storeInitializationWarning = "共享记录目录暂时不可用：\(error.localizedDescription)"
         }
 
         let token = loadedAccessCode.value
@@ -84,6 +103,21 @@ final class AppModel: ObservableObject {
         self.screenshotsDirectory = directories.screenshots
         self.screenshotDraftsDirectory = directories.drafts
         self.globalShortcuts = shortcutLoadResult.shortcuts
+        if storageConflict {
+            if let fallbackRoot {
+                try? FileManager.default.removeItem(at: fallbackRoot)
+            }
+            DispatchQueue.main.async {
+                let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.cross.crosstool"
+                let currentPID = ProcessInfo.processInfo.processIdentifier
+                NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+                    .first(where: { $0.processIdentifier != currentPID })?
+                    .activate(options: [.activateAllWindows])
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
         OnePawApplicationDelegate.recordingModel = screenRecording
         OnePawApplicationDelegate.mainWindowOpenRequestBroker.install { [weak self] in
             self?.presentMainWindow()
@@ -94,7 +128,7 @@ final class AppModel: ObservableObject {
 
         createdStore.setChangeHandler { [weak self] in
             Task { @MainActor in
-                self?.refreshItems()
+                self?.refreshItems(announcesNewIncoming: true)
             }
         }
         server.setStateHandler { [weak self] state in
@@ -136,8 +170,11 @@ final class AppModel: ObservableObject {
             Self.logger.info("Registered global tool shortcuts: \(labels, privacy: .public)")
         }
 
-        refreshItems()
+        refreshItems(announcesNewIncoming: false)
         startServer()
+        if let storeInitializationWarning {
+            notice = storeInitializationWarning
+        }
     }
 
     var isServerRunning: Bool {
@@ -462,22 +499,34 @@ final class AppModel: ObservableObject {
     }
 
     func removePublicItem(_ item: SharedItem) {
+        let succeeded: Bool
         if item.direction == .outgoing {
-            store.removeOutgoing(id: item.id)
+            succeeded = store.removeOutgoing(id: item.id)
         } else {
-            store.hideIncomingFromPublic(id: item.id)
+            succeeded = store.hideIncomingFromPublic(id: item.id)
         }
-        notice = "已从课堂共享区移除，原文件不会被删除"
+        notice = succeeded
+            ? "已从课堂共享区移除，原文件不会被删除"
+            : SharedContentStoreError.persistenceFailed.localizedDescription
+    }
+
+    func publishIncoming(_ item: SharedItem) {
+        let succeeded = store.publishIncoming(id: item.id)
+        notice = succeeded
+            ? "已重新加入课堂共享区"
+            : SharedContentStoreError.persistenceFailed.localizedDescription
     }
 
     func clearPublicItems() {
-        store.clearPublicItems()
-        notice = "课堂共享区已清空，接收的原文件仍保留在本机"
+        notice = store.clearPublicItems()
+            ? "课堂共享区已清空，接收的原文件仍保留在本机"
+            : SharedContentStoreError.persistenceFailed.localizedDescription
     }
 
     func clearInbox() {
-        store.clearIncoming(deleteFiles: false)
-        notice = "学生上传记录已移出共享区，原文件仍保留在接收箱"
+        notice = store.clearIncoming(deleteFiles: false)
+            ? "学生上传记录已移出共享区，原文件仍保留在接收箱"
+            : SharedContentStoreError.persistenceFailed.localizedDescription
     }
 
     func openInboxDirectory() {
@@ -909,11 +958,12 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    private func refreshItems() {
+    private func refreshItems(announcesNewIncoming: Bool) {
         sharedItems = store.outgoingSnapshot()
         receivedItems = store.incomingSnapshot()
         publicItems = store.publicSnapshot()
-        if let newest = receivedItems.first,
+        if announcesNewIncoming,
+           let newest = receivedItems.first,
            Date().timeIntervalSince(newest.createdAt) < 2 {
             let title = newest.kind == .text ? "收到一段文字" : "收到文件：\(newest.title)"
             notice = title

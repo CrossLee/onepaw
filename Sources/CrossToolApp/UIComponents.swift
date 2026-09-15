@@ -220,6 +220,7 @@ struct SharedItemRow: View {
     @EnvironmentObject private var model: AppModel
     let item: SharedItem
     let showsRemove: Bool
+    var showsPublish = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -259,6 +260,12 @@ struct SharedItemRow: View {
                 }
                 .labelStyle(.iconOnly)
                 .help("从课堂共享区移除")
+            } else if showsPublish, item.direction == .incoming {
+                Button("重新共享", systemImage: "arrow.up.doc") {
+                    model.publishIncoming(item)
+                }
+                .labelStyle(.iconOnly)
+                .help("重新加入课堂共享区")
             }
         }
         .padding(.horizontal, 16)

@@ -19,10 +19,10 @@
 
 | 平台 | 最新已发布版本 | 安装包 | 发布状态 |
 | :--- | :--- | :--- | :--- |
-| macOS 14+ · Apple Silicon / Intel | [0.6.8](https://github.com/CrossLee/onepaw/releases/tag/v0.6.8) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.8/OnePaw-0.6.8-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
+| macOS 14+ · Apple Silicon / Intel | [0.6.9](https://github.com/CrossLee/onepaw/releases/tag/v0.6.9) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.9/OnePaw-0.6.9-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
 | Windows 11 · x64 / ARM64 | [0.1.29.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.29.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.29.0-preview/OnePaw-Windows-0.1.29.0-Setup.exe)** | 预览版 · 尚未签名 |
 
-Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.8/OnePaw-0.6.8-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.8/OnePaw-0.6.8-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
+Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.9/OnePaw-0.6.9-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.9/OnePaw-0.6.9-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
 
 Windows 安装器可直接双击，自动选择架构，不需要操作 PowerShell。当前仍是未签名预览版，可能出现“未知发布者”提示，部分设备策略会阻止安装；不要关闭安全保护来绕过限制。[签名进度与说明](docs/windows-signing.md)
 
@@ -47,7 +47,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 - **屏幕录制** — 录屏幕、窗口或指定区域，按需保留系统声音和鼠标指针。Mac 当前不采集麦克风，成片默认只保存在本机。
 - **屏幕取色** — 提取标准 sRGB 颜色，复制 HEX、RGB 或 HSL，保存最近使用的颜色。
 - **本机翻译** — 双栏翻译，也可为选中文字设置快捷中英互译。Mac 需要 macOS 15+；两平台首次准备语言模型可能需要联网。
-- **局域网分享** — 分享文件、图片、文字和链接。其他人用浏览器即可查看、下载、上传，不需要安装客户端；Mac 和 Windows 默认使用 10 位随机访问码，也可改成 6–24 位自定义访问码。换码后旧链接立即失效，你也随时可以停止共享。
+- **局域网分享** — 分享文件、图片、文字和链接。其他人用浏览器即可查看、下载、上传，不需要安装客户端；Mac 会在本机保存共享清单，重启后恢复记录，升级首次启动也会自动找回接收箱内已有文件。Mac 和 Windows 默认使用 10 位随机访问码，也可改成 6–24 位自定义访问码。换码后旧链接立即失效，你也随时可以停止共享。
 
 此外还提供自定义全局快捷键、登录时启动，以及文件/文件夹的右键复制路径。Mac 的复制路径位于 Finder“服务”菜单，后台完成，不弹主界面。
 
@@ -72,7 +72,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 
 Universal 2 同时支持 Apple Silicon 与 Intel，无需 Rosetta。macOS 14 可用除本机翻译以外的其他功能；本机翻译需要 macOS 15+。
 
-**从旧名称升级到一爪，请下载 0.6.8 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
+**从旧名称升级到一爪，请下载 0.6.9 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
 
 安装并打开一次后，系统才会注册 Finder 服务；若“复制路径”未显示，可检查系统键盘快捷键中的“服务”。
 
