@@ -44,7 +44,7 @@ if ($bundles.Count -ne 1 -or $bundles[0].FullName -ne $bundlePath) {
 
 # Verify the original manifest before adding our seventh checksum. Reject
 # arbitrary paths, duplicates, or stale payloads rather than wrapping them.
-$setupName = "一爪-Windows-$Version-Setup.exe"
+$setupName = "OnePaw-Windows-$Version-Setup.exe"
 $checksums = @(Get-Content -Encoding UTF8 -LiteralPath $checksumsPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $originalChecksums = @()
 $seenNames = @{}

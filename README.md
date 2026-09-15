@@ -19,10 +19,10 @@
 
 | 平台 | 最新已发布版本 | 安装包 | 发布状态 |
 | :--- | :--- | :--- | :--- |
-| macOS 14+ · Apple Silicon / Intel | [0.6.6](https://github.com/CrossLee/onepaw/releases/tag/v0.6.6) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/%E4%B8%80%E7%88%AA-0.6.6-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
+| macOS 14+ · Apple Silicon / Intel | [0.6.6](https://github.com/CrossLee/onepaw/releases/tag/v0.6.6) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/OnePaw-0.6.6-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
 | Windows 11 · x64 / ARM64 | [0.1.20.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.20.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.20.0-preview/Crosio-Windows-0.1.20.0-Setup.exe)** | 预览版 · 尚未签名 |
 
-Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/%E4%B8%80%E7%88%AA-0.6.6-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/%E4%B8%80%E7%88%AA-0.6.6-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
+Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/OnePaw-0.6.6-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.6/OnePaw-0.6.6-macos-universal2.zip)。版本信息更新于 **2026-09-15**。
 
 Windows 安装器可直接双击，自动选择架构，不需要操作 PowerShell。当前仍是未签名预览版，可能出现“未知发布者”提示，部分设备策略会阻止安装；不要关闭安全保护来绕过限制。[签名进度与说明](docs/windows-signing.md)
 
@@ -82,7 +82,7 @@ Universal 2 同时支持 Apple Silicon 与 Intel，无需 Rosetta。macOS 14 可
 <summary><strong>Windows · 双击中文安装程序</strong></summary>
 
 1. 使用自己的、具有管理员权限的 Windows 账户；升级前先退出旧版。
-2. 双击下载的 `Setup.exe`，确认系统管理员授权，按向导点击“安装”“完成”。更名版文件名为 `一爪-Windows-版本号-Setup.exe`。
+2. 双击下载的 `Setup.exe`，确认系统管理员授权，按向导点击“安装”“完成”。新版文件名为 `OnePaw-Windows-版本号-Setup.exe`。
 3. 从开始菜单打开应用，或在安装完成页选择立即打开；更名版开始菜单显示“一爪”。
 
 需要 Windows 11 build 22000 或更高版本，支持 x64 / ARM64，安装包包含运行所需组件。安装本身无需联网；首次下载翻译模型需要联网。

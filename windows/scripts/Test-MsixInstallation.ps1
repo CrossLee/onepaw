@@ -38,6 +38,7 @@ if (-not (Test-Path -LiteralPath $windowAcceptancePath -PathType Leaf)) {
 
 $releaseDirectory = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $brandName = -join @([char]0x4E00, [char]0x722A)
+$setupAssetBrand = "OnePaw"
 $expectedHomeName = -join @([char]0x9996, [char]0x9875)
 $installerPath = Join-Path $releaseDirectory ((-join @([char]0x5B89, [char]0x88C5)) + "$brandName.ps1")
 $buildInfoPath = Join-Path $releaseDirectory "build-info.json"
@@ -53,7 +54,7 @@ $expectedVersion = [version]$buildInfo.version
 if ($buildInfo.product -ne "Crosio" -or @($buildInfo.architectures) -notcontains "ARM64") {
     throw "The build information does not identify an ARM64 Crosio release."
 }
-$setupPath = Join-Path $releaseDirectory "$brandName-Windows-$($buildInfo.version)-Setup.exe"
+$setupPath = Join-Path $releaseDirectory "$setupAssetBrand-Windows-$($buildInfo.version)-Setup.exe"
 $selectedInstallerPath = if ($UseSetup) { $setupPath } else { $installerPath }
 if (-not (Test-Path -LiteralPath $selectedInstallerPath -PathType Leaf)) {
     throw "Missing installation test input: $selectedInstallerPath"

@@ -128,6 +128,10 @@ test('release source and target remain pinned to the exact verified SHA', () => 
 
 test('exact source files, hashes, cloud byte comparison, and draft-first publication stay enforced', () => {
   const publish = blockAfter('publish-preview:', 2);
+  assert.ok(publish.includes('setup_name="OnePaw-Windows-${version}-Setup.exe"'),
+    'The public Setup asset must use the ASCII-safe OnePaw brand.');
+  assert.doesNotMatch(publish, /setup_name="一爪-Windows-/,
+    'A localized Setup asset prefix is not stable on GitHub Releases.');
   for (const contract of [
     'diff -u "$preview_root/expected-source-files.txt" "$preview_root/actual-source-files.txt"',
     'diff -u "$preview_root/expected-source-hashes.txt" "$preview_root/actual-source-hashes.txt"',

@@ -4,7 +4,7 @@
 
 ## 安装与启动
 
-1. 下载[发布页](https://github.com/CrossLee/onepaw/releases)里的 `一爪-Windows-版本号-Setup.exe`，不需要下载源码或解压其他文件。
+1. 下载[发布页](https://github.com/CrossLee/onepaw/releases)里的 `OnePaw-Windows-版本号-Setup.exe`，不需要下载源码或解压其他文件。
 2. 双击安装程序，在 Windows 管理员授权提示中确认安装。
 3. 在中文向导中点击“安装”，等待安装完成，再点击“完成”。安装器会自动选择 x64 或 ARM64，并安装所需运行库，不需要输入任何命令。
 4. 从开始菜单打开“一爪”；也可在完成页勾选立即打开。关闭主窗口后，程序留在通知区域；退出请使用托盘菜单中的“退出”。

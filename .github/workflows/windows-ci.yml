@@ -244,7 +244,9 @@ jobs:
           bundle_name="一爪-Windows-${version}-unsigned-test.msixbundle"
           x64_name="一爪-Windows-${version}-x64-unsigned-test.msix"
           arm64_name="一爪-Windows-${version}-arm64-unsigned-test.msix"
-          setup_name="一爪-Windows-${version}-Setup.exe"
+          # GitHub release assets use an ASCII-safe brand so the uploaded name
+          # remains byte-for-byte identical to the locally verified filename.
+          setup_name="OnePaw-Windows-${version}-Setup.exe"
           release_tag="windows-v${version}-preview"
 
           preview_root="$(mktemp -d "$RUNNER_TEMP/crosio-preview.XXXXXX")"

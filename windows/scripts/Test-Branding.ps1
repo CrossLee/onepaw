@@ -43,9 +43,9 @@ $requiredSourceText = @{
     "windows/src/Crosio.Windows.Platform/Images/ImageCompressionPathPolicy.cs" = @('sequence == 1 ? "-一爪" : $"-一爪-{sequence}"')
     "windows/installer/CrosioSetup.nsi" = @('Name "一爪"', 'Caption "一爪 安装"', '"ProductName" "一爪"', '"FileDescription" "一爪 图形化安装器"', '搜索 一爪')
     "windows/scripts/build-msixbundle.ps1" = @('"一爪-Windows-$Version-$packageFlavor.msixbundle"', '"安装一爪.ps1"', '[System.Text.UTF8Encoding]::new($true)')
-    "windows/scripts/build-setup.ps1" = @('"一爪-Windows-$Version-Setup.exe"', '"安装一爪.ps1"', 'Get-Content -Encoding UTF8 -LiteralPath $checksumsPath')
-    "windows/scripts/Test-MsixInstallation.ps1" = @('$brandName = -join @([char]0x4E00, [char]0x722A)', '"\u4e00\u722a"')
-    ".github/workflows/windows-ci.yml" = @('setup_name="一爪-Windows-${version}-Setup.exe"', '"安装一爪.ps1"', 'diff -u "$preview_root/expected-source-hashes.txt" "$preview_root/actual-source-hashes.txt"', 'sha256sum --check --strict')
+    "windows/scripts/build-setup.ps1" = @('"OnePaw-Windows-$Version-Setup.exe"', '"安装一爪.ps1"', 'Get-Content -Encoding UTF8 -LiteralPath $checksumsPath')
+    "windows/scripts/Test-MsixInstallation.ps1" = @('$brandName = -join @([char]0x4E00, [char]0x722A)', '$setupAssetBrand = "OnePaw"', '"\u4e00\u722a"')
+    ".github/workflows/windows-ci.yml" = @('setup_name="OnePaw-Windows-${version}-Setup.exe"', '"安装一爪.ps1"', 'diff -u "$preview_root/expected-source-hashes.txt" "$preview_root/actual-source-hashes.txt"', 'sha256sum --check --strict')
 }
 foreach ($entry in $requiredSourceText.GetEnumerator()) {
     $text = Read-Source $entry.Key

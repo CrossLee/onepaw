@@ -4,7 +4,7 @@
 
 ## 普通用户安装
 
-在 [GitHub 的 Windows 预览版发布页](https://github.com/CrossLee/onepaw/releases)下载 `一爪-Windows-版本号-Setup.exe`，双击后按中文向导点击“安装”和“完成”。不需要解压、不需要输入 PowerShell 命令，也不需要另装 .NET 或其他运行库。安装后从开始菜单打开“一爪”；卸载使用 Windows“设置 → 应用 → 已安装的应用”。
+在 [GitHub 的 Windows 预览版发布页](https://github.com/CrossLee/onepaw/releases)下载 `OnePaw-Windows-版本号-Setup.exe`，双击后按中文向导点击“安装”和“完成”。不需要解压、不需要输入 PowerShell 命令，也不需要另装 .NET 或其他运行库。安装后从开始菜单打开“一爪”；卸载使用 Windows“设置 → 应用 → 已安装的应用”。
 
 当前安装器和应用是未签名预览版，可能出现 Windows 未知发布者或安全提示，不代表已经有正式代码签名。安装需要管理员授权，不会导入信任证书或关闭系统安全功能。更多说明见 [TESTING.md](TESTING.md)。下文中的 PowerShell 命令仅供开发者构建和验证，不是用户安装步骤。
 
@@ -138,7 +138,7 @@ Explorer 扩展采用系统 COM surrogate：`com:SurrogateServer` 直接注册 D
 - `一爪-Windows-0.1.21.0-x64-unsigned-test.msix`；
 - `一爪-Windows-0.1.21.0-arm64-unsigned-test.msix`；
 - `一爪-Windows-0.1.21.0-unsigned-test.msixbundle`；
-- `一爪-Windows-0.1.21.0-Setup.exe`（继续运行 `build-setup.ps1` 后）。
+- `OnePaw-Windows-0.1.21.0-Setup.exe`（继续运行 `build-setup.ps1` 后）。
 
 有证书时前三个包文件把 `unsigned-test` 改为 `signed`。这不自动代表安装器 EXE 已签名；应分别核验应用包与 EXE 的签名状态。Actions 中对应的归档名称为 `一爪-windows-<版本>-unsigned-test` 或 `一爪-windows-<版本>-signed`，另有 `一爪-windows-x64-test-build` unpackaged 归档。
 
