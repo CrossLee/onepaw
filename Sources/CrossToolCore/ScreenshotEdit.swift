@@ -6,6 +6,8 @@ public enum ScreenshotEditTool: String, CaseIterable, Equatable, Sendable {
     case mosaic
     case rectangle
     case arrow
+    case text
+    case sequence
 }
 
 /// An RGBA color whose components are normalized to the closed range `0...1`.
@@ -245,12 +247,83 @@ public struct ScreenshotArrowAnnotation: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A single-line text label anchored at its top-left corner in source pixels.
+public struct ScreenshotTextAnnotation: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let origin: ScreenshotEditPoint
+    public let text: String
+    public let color: ScreenshotRGBAColor
+    public let fontSize: Double
+
+    public init(
+        id: UUID = UUID(),
+        origin: ScreenshotEditPoint,
+        text: String,
+        color: ScreenshotRGBAColor,
+        fontSize: Double = 48
+    ) {
+        self.id = id
+        self.origin = origin
+        self.text = text
+        self.color = color
+        self.fontSize = fontSize
+    }
+}
+
+/// A numbered badge followed by an optional single-line explanation.
+///
+/// `origin` is the top-left corner of the badge in source pixels. Keeping the
+/// number as an integer prevents malformed values from reaching the renderer;
+/// the editor owns the temporary string used while the user is typing.
+public struct ScreenshotSequenceAnnotation: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let origin: ScreenshotEditPoint
+    public let number: Int
+    public let text: String
+    public let color: ScreenshotRGBAColor
+    public let fontSize: Double
+
+    public init(
+        id: UUID = UUID(),
+        origin: ScreenshotEditPoint,
+        number: Int,
+        text: String = "",
+        color: ScreenshotRGBAColor,
+        fontSize: Double = 48
+    ) {
+        self.id = id
+        self.origin = origin
+        self.number = number
+        self.text = text
+        self.color = color
+        self.fontSize = fontSize
+    }
+
+    public var badgeDiameter: Double {
+        max(28, max(18, fontSize) * 1.35)
+    }
+
+    public var badgeFontSize: Double {
+        let preferredSize = max(12, max(18, fontSize) * 0.72)
+        let characterCount = Double(max(1, String(number).count))
+        let estimatedWidthAtOnePoint = characterCount * 0.62
+        let fittingSize = badgeDiameter * 0.76 / estimatedWidthAtOnePoint
+        return max(10, min(preferredSize, fittingSize))
+    }
+
+    public var textGap: Double {
+        max(8, max(18, fontSize) * 0.28)
+    }
+}
+
 /// One committed, immutable screenshot edit.
 public enum ScreenshotEditOperation: Identifiable, Equatable, Sendable {
     case freehand(ScreenshotFreehandStroke)
     case mosaic(ScreenshotMosaicStroke)
     case rectangle(ScreenshotRectangleAnnotation)
     case arrow(ScreenshotArrowAnnotation)
+    case text(ScreenshotTextAnnotation)
+    case sequence(ScreenshotSequenceAnnotation)
 
     public var id: UUID {
         switch self {
@@ -258,6 +331,8 @@ public enum ScreenshotEditOperation: Identifiable, Equatable, Sendable {
         case let .mosaic(stroke): stroke.id
         case let .rectangle(annotation): annotation.id
         case let .arrow(annotation): annotation.id
+        case let .text(annotation): annotation.id
+        case let .sequence(annotation): annotation.id
         }
     }
 
@@ -267,6 +342,8 @@ public enum ScreenshotEditOperation: Identifiable, Equatable, Sendable {
         case .mosaic: .mosaic
         case .rectangle: .rectangle
         case .arrow: .arrow
+        case .text: .text
+        case .sequence: .sequence
         }
     }
 }

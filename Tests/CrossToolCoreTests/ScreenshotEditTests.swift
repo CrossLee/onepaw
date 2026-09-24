@@ -2,6 +2,17 @@ import Foundation
 import Testing
 @testable import CrossToolCore
 
+@Test func screenshotEditToolsKeepStableToolbarOrderIncludingTextAndSequence() {
+    #expect(ScreenshotEditTool.allCases == [
+        .pen,
+        .mosaic,
+        .rectangle,
+        .arrow,
+        .text,
+        .sequence,
+    ])
+}
+
 @Test func screenshotEditHistoryCommitsEveryOperationKindInOrder() {
     let pen = ScreenshotEditOperation.freehand(
         ScreenshotFreehandStroke(
@@ -57,6 +68,71 @@ import Testing
     } else {
         Issue.record("Expected a rectangle operation")
     }
+}
+
+@Test func screenshotTextAndSequenceOperationsPreserveTheirCompletePayloads() {
+    let text = ScreenshotEditOperation.text(
+        ScreenshotTextAnnotation(
+            id: fixedID(5),
+            origin: point(120, 80),
+            text: "第一处说明",
+            color: .purple,
+            fontSize: 36
+        )
+    )
+    let sequence = ScreenshotEditOperation.sequence(
+        ScreenshotSequenceAnnotation(
+            id: fixedID(6),
+            origin: point(320, 180),
+            number: 7,
+            text: "下一步",
+            color: .orange,
+            fontSize: 42
+        )
+    )
+    var history = ScreenshotEditHistory()
+
+    history.commit(text)
+    history.commit(sequence)
+
+    #expect(history.operations == [text, sequence])
+    #expect(history.operations.map(\.tool) == [.text, .sequence])
+    #expect(text.id == fixedID(5))
+    #expect(sequence.id == fixedID(6))
+
+    guard case .text(let textPayload) = history.operations[0],
+          case .sequence(let sequencePayload) = history.operations[1] else {
+        Issue.record("Expected text followed by sequence operations")
+        return
+    }
+    #expect(textPayload.origin == point(120, 80))
+    #expect(textPayload.text == "第一处说明")
+    #expect(textPayload.color == .purple)
+    #expect(textPayload.fontSize == 36)
+    #expect(sequencePayload.origin == point(320, 180))
+    #expect(sequencePayload.number == 7)
+    #expect(sequencePayload.text == "下一步")
+    #expect(sequencePayload.color == .orange)
+    #expect(sequencePayload.fontSize == 42)
+    #expect(sequencePayload.badgeDiameter > 0)
+    #expect(sequencePayload.badgeFontSize > 0)
+    #expect(sequencePayload.textGap > 0)
+
+    let sixDigitSequence = ScreenshotSequenceAnnotation(
+        origin: sequencePayload.origin,
+        number: 999_999,
+        color: sequencePayload.color,
+        fontSize: sequencePayload.fontSize
+    )
+    #expect(sixDigitSequence.badgeDiameter == sequencePayload.badgeDiameter)
+    #expect(sixDigitSequence.badgeFontSize < sequencePayload.badgeFontSize)
+
+    #expect(history.undo() == sequence)
+    #expect(history.undo() == text)
+    #expect(history.operations.isEmpty)
+    #expect(history.redo() == text)
+    #expect(history.redo() == sequence)
+    #expect(history.operations == [text, sequence])
 }
 
 @Test func screenshotEditHistoryUndoAndRedoRestoreExactOrder() {

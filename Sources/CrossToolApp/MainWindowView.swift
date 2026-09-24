@@ -514,35 +514,6 @@ private struct InboxPage: View {
     }
 }
 
-private struct HistoryPage: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                PageHeader(title: "历史记录", subtitle: "保存在本机的分享和接收记录")
-                ContentSection(title: "全部记录") {
-                    let items = (model.sharedItems + model.receivedItems).sorted { $0.createdAt > $1.createdAt }
-                    if items.isEmpty {
-                        EmptyContentRow(systemImage: "clock", text: "还没有内容记录")
-                    } else {
-                        ForEach(items) { item in
-                            SharedItemRow(
-                                item: item,
-                                showsRemove: model.publicItems.contains(where: { $0.id == item.id }),
-                                showsPublish: item.direction == .incoming
-                                    && !model.publicItems.contains(where: { $0.id == item.id })
-                            )
-                            if item.id != items.last?.id { Divider() }
-                        }
-                    }
-                }
-            }
-            .padding(30)
-        }
-    }
-}
-
 private struct SettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var loginItemSettings = LoginItemSettingsModel()
@@ -551,6 +522,7 @@ private struct SettingsPage: View {
     var body: some View {
         Form {
             LoginItemSettingsSection(model: loginItemSettings)
+            ClipboardHistorySettingsSection(model: model.clipboardHistory)
             Section("Finder 右键服务") {
                 LabeledContent("操作", value: "服务 → 复制路径")
                 Text("在 Finder 中选中文件或文件夹，右键选择“服务 → 复制路径”。支持多选，每行一个完整路径；仅复制路径，不读取或修改文件内容。")
@@ -581,7 +553,7 @@ private struct SettingsPage: View {
                     .disabled(true)
             }
             Section("存储") {
-                Text("一爪数据目录：~/Library/Application Support/crosstool（包含 Inbox、Screenshots 与 Recordings）")
+                Text("一爪数据目录：~/Library/Application Support/crosstool（包含 Inbox、Screenshots、Recordings 与 ClipboardHistory-v1）")
                     .foregroundStyle(.secondary)
             }
             GlobalShortcutSettingsSection()

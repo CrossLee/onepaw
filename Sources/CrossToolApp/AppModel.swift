@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     let colorSampler = ColorSamplerViewModel()
     let imageCompression = ImageCompressionFeatureModel()
     let screenRecording = ScreenRecordingFeatureModel()
+    let clipboardHistory: ClipboardHistoryFeatureModel
     @Published private(set) var port: UInt16 = 5421
 
     private let store: SharedContentStore
@@ -46,13 +47,16 @@ final class AppModel: ObservableObject {
     private var screenCapturePermissionGate = ScreenCapturePermissionGate()
     private var screenshotEditorWindowController: ScreenshotEditorWindowController?
     private let pinnedScreenshotManager = PinnedScreenshotManager()
-    private let selectedTextCaptureService = SelectedTextCaptureService()
+    private let clipboardHistoryObservationGate: ClipboardHistoryObservationGate
+    private let selectedTextCaptureService: SelectedTextCaptureService
     private var selectedTextTranslationTask: Task<Void, Never>?
+    private var selectedTextTranslationGeneration: UInt64 = 0
     private var isPreparingColorSampling = false
     private var lastClaimedMainWindowOpenRequestID = 0
 
     init(defaults: UserDefaults = .standard) {
         let directories = Self.makeDirectories()
+        let clipboardHistoryObservationGate = ClipboardHistoryObservationGate()
         let shortcutLoadResult = Self.loadGlobalShortcuts()
         let loadedAccessCode = ShareAccessCodePreferences.load(from: defaults)
         Self.removeStaleScreenshotDrafts(in: directories.drafts)
@@ -102,6 +106,27 @@ final class AppModel: ObservableObject {
         self.screenshotService = ScreenshotService(outputDirectory: directories.drafts)
         self.screenshotsDirectory = directories.screenshots
         self.screenshotDraftsDirectory = directories.drafts
+        self.clipboardHistoryObservationGate = clipboardHistoryObservationGate
+        let clipboardHistoryDirectory: URL
+        if storageConflict, let fallbackRoot {
+            // A second launch must never inspect or clean the primary
+            // instance's clipboard payloads while that instance may be in the
+            // middle of committing its index.
+            clipboardHistoryDirectory = fallbackRoot.appendingPathComponent(
+                "ClipboardHistory-v1",
+                isDirectory: true
+            )
+        } else {
+            clipboardHistoryDirectory = directories.clipboardHistory
+        }
+        self.clipboardHistory = ClipboardHistoryFeatureModel(
+            directory: clipboardHistoryDirectory,
+            defaults: defaults,
+            observationGate: clipboardHistoryObservationGate
+        )
+        self.selectedTextCaptureService = SelectedTextCaptureService(
+            clipboardHistoryObservationGate: clipboardHistoryObservationGate
+        )
         self.globalShortcuts = shortcutLoadResult.shortcuts
         if storageConflict {
             if let fallbackRoot {
@@ -170,6 +195,7 @@ final class AppModel: ObservableObject {
             Self.logger.info("Registered global tool shortcuts: \(labels, privacy: .public)")
         }
 
+        clipboardHistory.start()
         refreshItems(announcesNewIncoming: false)
         startServer()
         if let storeInitializationWarning {
@@ -340,13 +366,36 @@ final class AppModel: ObservableObject {
         // Resolve the target application before any async work. OnePaw only
         // activates its own window after the selection has been captured.
         let applicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        selectedTextTranslationTask?.cancel()
-        selectedTextTranslationTask = Task { @MainActor [weak self] in
+        selectedTextTranslationGeneration &+= 1
+        let generation = selectedTextTranslationGeneration
+        let previousTask = selectedTextTranslationTask
+        previousTask?.cancel()
+
+        let task = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer {
+                if self.selectedTextTranslationGeneration == generation {
+                    self.selectedTextTranslationTask = nil
+                }
+            }
+
+            // If an older request has already posted Command-C, let its bounded
+            // pasteboard transaction finish restoring before starting another.
+            if let previousTask {
+                _ = await previousTask.value
+            }
+            guard !Task.isCancelled,
+                  self.selectedTextTranslationGeneration == generation else {
+                return
+            }
+
             let result = await selectedTextCaptureService.capture(
                 applicationPID: applicationPID
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  self.selectedTextTranslationGeneration == generation else {
+                return
+            }
 
             let payload: TextTranslationLaunchRequest.Payload
             switch result {
@@ -362,17 +411,31 @@ final class AppModel: ObservableObject {
                 )
             case .noSelection:
                 payload = .message("没有读取到选中文字。请先在其他 App 中选中一段中文或英文，再按快捷键。")
+            case .secureInput:
+                payload = .message("当前是密码框或安全输入区域，一爪不会读取这里的内容。")
+            case .clipboardUnavailable:
+                payload = .message(
+                    "为保护原剪贴板，一爪没有执行快捷翻译。请先手动复制文字，再在翻译页点击“粘贴”。"
+                )
+            case .clipboardRestoreFailed:
+                payload = .message(
+                    "已读取文字，但原剪贴板未能完整恢复。请先检查剪贴板内容，再重新尝试快捷翻译。"
+                )
+            case .targetChanged:
+                payload = .message("读取期间前台 App 已切换。请重新选中文字后再按快捷键。")
+            case .cancelled:
+                return
             case .unavailable:
                 payload = .message(
-                    "当前 App 没有向 macOS 提供选中文字。可以先复制文字，再在翻译页点击“粘贴”。"
+                    "当前 App 暂时无法读取所选文字。可以先复制文字，再在翻译页点击“粘贴”。"
                 )
             }
 
             textTranslationLaunchRequest = TextTranslationLaunchRequest(payload: payload)
             selectedDestination = .translation
             presentMainWindow()
-            selectedTextTranslationTask = nil
         }
+        selectedTextTranslationTask = task
     }
 
     private func toggleRecordingFromShortcut(_ source: ScreenRecordingSource) {
@@ -427,8 +490,10 @@ final class AppModel: ObservableObject {
     }
 
     func copyShareLink() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(shareURL, forType: .string)
+        clipboardHistory.suppressSensitivePasteboardWrite {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(shareURL, forType: .string)
+        }
         notice = "共享链接已复制"
     }
 
@@ -1116,15 +1181,24 @@ final class AppModel: ObservableObject {
         "\(shortcutFailureMessage(for: result))；为避免部分生效，当前已配置的全局快捷键均未启用"
     }
 
-    private static func makeDirectories() -> (inbox: URL, screenshots: URL, drafts: URL) {
+    private static func makeDirectories() -> (
+        inbox: URL,
+        screenshots: URL,
+        drafts: URL,
+        clipboardHistory: URL
+    ) {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("crosstool", isDirectory: true)
         let inbox = root.appendingPathComponent("Inbox", isDirectory: true)
         let screenshots = root.appendingPathComponent("Screenshots", isDirectory: true)
         let drafts = screenshots.appendingPathComponent("Drafts", isDirectory: true)
+        let clipboardHistory = root.appendingPathComponent(
+            "ClipboardHistory-v1",
+            isDirectory: true
+        )
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: drafts, withIntermediateDirectories: true)
-        return (inbox, screenshots, drafts)
+        return (inbox, screenshots, drafts, clipboardHistory)
     }
 
     private static func removeStaleScreenshotDrafts(in directory: URL) {

@@ -101,9 +101,26 @@ private struct TranslationAvailablePage: View {
             .padding(30)
         }
         .task(id: launchRequest?.id) {
-            await model.loadSupportedLanguagesIfNeeded()
-            guard !Task.isCancelled, let launchRequest else { return }
-            await handleLaunchRequest(launchRequest)
+            guard let launchRequest else {
+                await model.loadSupportedLanguagesIfNeeded()
+                return
+            }
+
+            switch launchRequest.payload {
+            case .message:
+                // Permission and compatibility feedback should appear without
+                // waiting for the system language catalogue to load.
+                await handleLaunchRequest(launchRequest)
+                await model.loadSupportedLanguagesIfNeeded()
+            case .translate(let text, _):
+                // Populate the editor synchronously when the page mounts. The
+                // language lookup and automatic translation can then continue
+                // in the background without showing a misleading empty box.
+                model.stageQuickTranslationInput(text)
+                await model.loadSupportedLanguagesIfNeeded()
+                guard !Task.isCancelled else { return }
+                await handleLaunchRequest(launchRequest)
+            }
         }
         .translationTask(configuration) { session in
             guard let request = model.currentRequest() else { return }
@@ -155,7 +172,7 @@ private struct TranslationAvailablePage: View {
                 Text("首次使用某个语言组合时，macOS 可能会请求下载对应语言模型。翻译结果不会自动加入课堂共享区。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("使用快捷翻译时，辅助功能权限只用于读取当前选中文字；一爪不会模拟复制，也不会改写剪贴板。")
+                Text("快捷翻译优先通过辅助功能读取选中文字；少数 App 不提供选中文字时，会短暂执行复制并尽力恢复原剪贴板。密码框和安全输入不会读取。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -304,9 +321,10 @@ private struct TranslationAvailablePage: View {
             ZStack(alignment: .topLeading) {
                 if text.wrappedValue.isEmpty {
                     Text(placeholder)
+                        .font(.body)
                         .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 8)
+                        .padding(.leading, 6)
+                        .padding(.top, 1)
                         .allowsHitTesting(false)
                 }
 
@@ -890,6 +908,14 @@ final class TranslationFeatureModel: ObservableObject {
         feedback = TranslationFeatureFeedback(kind: .information, message: message)
     }
 
+    func stageQuickTranslationInput(_ text: String) {
+        inputText = text
+        outputText = ""
+        detectedSourceLanguage = nil
+        invalidatePendingRequest()
+        feedback = nil
+    }
+
     func prepareQuickTranslation(
         text: String,
         direction: QuickTranslationDirection
@@ -911,10 +937,7 @@ final class TranslationFeatureModel: ObservableObject {
             return false
         }
 
-        inputText = text
-        outputText = ""
-        detectedSourceLanguage = nil
-        invalidatePendingRequest()
+        stageQuickTranslationInput(text)
         sourceLanguage = source
         targetLanguage = target
         defaults.set(source.minimalIdentifier, forKey: Self.sourceLanguageDefaultsKey)

@@ -79,7 +79,7 @@ struct GlobalShortcutSettingsSection: View {
 
             if commands.contains(.translateText) {
                 Label(
-                    "快捷翻译会读取当前 App 的选中文字，需要在 macOS“辅助功能”中允许一爪；只打开翻译页不需要此权限。",
+                    "快捷翻译优先通过辅助功能读取选中文字；少数 App 不提供选中文字时，会短暂执行复制并尽力恢复原剪贴板。密码框和安全输入不会读取。",
                     systemImage: "accessibility"
                 )
                 .font(.caption)

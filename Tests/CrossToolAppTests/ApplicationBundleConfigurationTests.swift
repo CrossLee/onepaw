@@ -152,6 +152,51 @@ struct ApplicationBundleConfigurationTests {
         #expect(deliveries == 2)
     }
 
+    @MainActor
+    @Test("An unhandled Escape closes the retained OnePaw main window")
+    func escapeCancelOperationClosesRetainedMainWindow() {
+        _ = NSApplication.shared
+        let window = makeMainWindow()
+        defer { window.orderOut(nil) }
+
+        window.orderFront(nil)
+        #expect(window.isVisible)
+
+        window.cancelOperation(nil)
+
+        #expect(!window.isVisible)
+        #expect(!window.isReleasedWhenClosed)
+    }
+
+    @MainActor
+    @Test("Escape leaves the main window visible while a sheet is attached")
+    func escapeCancelOperationDefersToAttachedSheet() {
+        _ = NSApplication.shared
+        let window = makeMainWindow()
+        let sheet = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 180),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            if window.attachedSheet === sheet {
+                window.endSheet(sheet)
+            }
+            sheet.orderOut(nil)
+            window.orderOut(nil)
+        }
+
+        window.orderFront(nil)
+        window.beginSheet(sheet)
+        #expect(window.attachedSheet === sheet)
+
+        window.cancelOperation(nil)
+
+        #expect(window.isVisible)
+        #expect(window.attachedSheet === sheet)
+    }
+
     @Test("Finder copy-path service accepts files and folders without replacing the selection")
     func sourceInfoPlistRegistersCopyPathService() throws {
         let info = try sourceInfoPlist()
@@ -183,5 +228,17 @@ struct ApplicationBundleConfigurationTests {
             PropertyListSerialization.propertyList(from: data, format: nil)
                 as? [String: Any]
         )
+    }
+
+    @MainActor
+    private func makeMainWindow() -> OnePawMainWindow {
+        let window = OnePawMainWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        return window
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CrossToolCore
@@ -83,6 +84,10 @@ final class ScreenshotEditorRenderer {
                 drawRectangle(annotation, in: context)
             case .arrow(let annotation):
                 drawArrow(annotation, in: context)
+            case .text(let annotation):
+                drawText(annotation, in: context)
+            case .sequence(let annotation):
+                drawSequence(annotation, in: context)
             }
             context.restoreGState()
         }
@@ -240,6 +245,101 @@ final class ScreenshotEditorRenderer {
         context.strokePath()
     }
 
+    private func drawText(_ annotation: ScreenshotTextAnnotation, in context: CGContext) {
+        let text = annotation.text.trimmingCharacters(in: .newlines)
+        guard !text.isEmpty else { return }
+        let metrics = textLine(
+            text,
+            fontSize: annotation.fontSize,
+            color: annotation.color,
+            weight: .medium
+        )
+        let topY = Double(pixelHeight) - annotation.origin.y
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(
+            x: annotation.origin.x,
+            y: topY - metrics.ascent
+        )
+        CTLineDraw(metrics.line, context)
+    }
+
+    private func drawSequence(
+        _ annotation: ScreenshotSequenceAnnotation,
+        in context: CGContext
+    ) {
+        let diameter = max(1, annotation.badgeDiameter)
+        let topY = Double(pixelHeight) - annotation.origin.y
+        let badgeRect = CGRect(
+            x: annotation.origin.x,
+            y: topY - diameter,
+            width: diameter,
+            height: diameter
+        )
+        context.setFillColor(annotation.color.cgColor)
+        context.fillEllipse(in: badgeRect)
+
+        let numberColor = annotation.color.contrastingTextColor
+        let number = textLine(
+            String(annotation.number),
+            fontSize: annotation.badgeFontSize,
+            color: numberColor,
+            weight: .bold
+        )
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(
+            x: badgeRect.midX - number.width / 2,
+            y: badgeRect.minY
+                + (diameter - number.ascent - number.descent) / 2
+                + number.descent
+        )
+        CTLineDraw(number.line, context)
+
+        let text = annotation.text.trimmingCharacters(in: .newlines)
+        guard !text.isEmpty else { return }
+        let description = textLine(
+            text,
+            fontSize: annotation.fontSize,
+            color: annotation.color,
+            weight: .medium
+        )
+        context.textPosition = CGPoint(
+            x: badgeRect.maxX + annotation.textGap,
+            y: badgeRect.minY
+                + (diameter - description.ascent - description.descent) / 2
+                + description.descent
+        )
+        CTLineDraw(description.line, context)
+    }
+
+    private func textLine(
+        _ text: String,
+        fontSize: Double,
+        color: ScreenshotRGBAColor,
+        weight: NSFont.Weight
+    ) -> (line: CTLine, width: Double, ascent: Double, descent: Double) {
+        let font = NSFont.systemFont(
+            ofSize: CGFloat(min(max(fontSize, 8), 512)),
+            weight: weight
+        )
+        let attributed = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: color.nsColor,
+            ]
+        )
+        let line = CTLineCreateWithAttributedString(attributed)
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        let width = CTLineGetTypographicBounds(
+            line,
+            &ascent,
+            &descent,
+            nil
+        )
+        return (line, width, ascent, descent)
+    }
+
     private func canvasPoint(_ point: ScreenshotEditPoint) -> CGPoint {
         CGPoint(x: point.x, y: Double(pixelHeight) - point.y)
     }
@@ -264,5 +364,19 @@ private extension ScreenshotRGBAColor {
             blue: CGFloat(blue),
             alpha: CGFloat(alpha)
         )
+    }
+
+    var nsColor: NSColor {
+        NSColor(
+            srgbRed: CGFloat(red),
+            green: CGFloat(green),
+            blue: CGFloat(blue),
+            alpha: CGFloat(alpha)
+        )
+    }
+
+    var contrastingTextColor: ScreenshotRGBAColor {
+        let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+        return luminance > 0.58 ? .black : .white
     }
 }

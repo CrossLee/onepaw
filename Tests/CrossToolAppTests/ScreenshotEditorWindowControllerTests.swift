@@ -92,7 +92,7 @@ struct ScreenshotEditorWindowControllerTests {
         }
     }
 
-    @Test("Command C copies the image unless OCR text has a selection")
+    @Test("Command C forwards to active text editing and otherwise copies the image")
     func commandCCopyRouting() throws {
         let commandC = try makeKeyEvent(
             modifierFlags: .command,
@@ -110,26 +110,101 @@ struct ScreenshotEditorWindowControllerTests {
             for: commandC,
             isKeyWindow: true,
             hasAttachedSheet: false,
-            hasSelectedText: false
+            hasSelectedText: false,
+            isEditingText: false
         ) == .copyImage)
         #expect(ScreenshotEditorCopyShortcut.decision(
             for: repeatedCommandC,
             isKeyWindow: true,
             hasAttachedSheet: false,
-            hasSelectedText: false
+            hasSelectedText: false,
+            isEditingText: false
         ) == .consume)
         #expect(ScreenshotEditorCopyShortcut.decision(
             for: commandC,
             isKeyWindow: true,
             hasAttachedSheet: false,
-            hasSelectedText: true
+            hasSelectedText: true,
+            isEditingText: false
+        ) == .forwardToTextResponder)
+        #expect(ScreenshotEditorCopyShortcut.decision(
+            for: commandC,
+            isKeyWindow: true,
+            hasAttachedSheet: false,
+            hasSelectedText: false,
+            isEditingText: true
         ) == .forwardToTextResponder)
         #expect(ScreenshotEditorCopyShortcut.decision(
             for: commandC,
             isKeyWindow: true,
             hasAttachedSheet: true,
-            hasSelectedText: false
+            hasSelectedText: false,
+            isEditingText: true
         ) == .ignore)
+    }
+
+    @Test("Mouse events bypass text editing Escape routing")
+    func mouseEventsBypassTextEditingEscapeRouting() throws {
+        for type: NSEvent.EventType in [
+            .leftMouseDown,
+            .leftMouseUp,
+            .mouseMoved,
+        ] {
+            let event = try makeMouseEvent(type: type)
+            #expect(ScreenshotEditorTextEditingEscapeShortcut.phase(for: event) == nil)
+        }
+    }
+
+    @Test("Only bare Escape key events enter text editing Escape routing")
+    func textEditingEscapeRouting() throws {
+        let escapeKeyDown = try makeKeyEvent(
+            characters: "\u{1B}",
+            keyCode: 53
+        )
+        let escapeKeyUp = try makeKeyEvent(
+            type: .keyUp,
+            characters: "\u{1B}",
+            keyCode: 53
+        )
+        #expect(
+            ScreenshotEditorTextEditingEscapeShortcut.phase(for: escapeKeyDown)
+                == .keyDown
+        )
+        #expect(
+            ScreenshotEditorTextEditingEscapeShortcut.phase(for: escapeKeyUp)
+                == .keyUp
+        )
+
+        let capsLockEscape = try makeKeyEvent(
+            modifierFlags: .capsLock,
+            characters: "\u{1B}",
+            keyCode: 53
+        )
+        #expect(
+            ScreenshotEditorTextEditingEscapeShortcut.phase(for: capsLockEscape)
+                == .keyDown
+        )
+
+        for modifiers: NSEvent.ModifierFlags in [
+            .command,
+            .control,
+            .option,
+            .shift,
+            .function,
+            [.command, .shift],
+        ] {
+            let modifiedEscape = try makeKeyEvent(
+                modifierFlags: modifiers,
+                characters: "\u{1B}",
+                keyCode: 53
+            )
+            #expect(
+                ScreenshotEditorTextEditingEscapeShortcut.phase(for: modifiedEscape) == nil
+            )
+        }
+
+        let bareA = try makeKeyEvent(characters: "a", keyCode: 0)
+        #expect(ScreenshotEditorTextEditingEscapeShortcut.phase(for: bareA) == nil)
     }
 
     @Test("Only an unobstructed visible OnePaw main window is hidden")
@@ -404,6 +479,20 @@ struct ScreenshotEditorWindowControllerTests {
             charactersIgnoringModifiers: characters,
             isARepeat: isARepeat,
             keyCode: keyCode
+        ))
+    }
+
+    private func makeMouseEvent(type: NSEvent.EventType) throws -> NSEvent {
+        try #require(NSEvent.mouseEvent(
+            with: type,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: type == .mouseMoved ? 0 : 1,
+            pressure: 0
         ))
     }
 }

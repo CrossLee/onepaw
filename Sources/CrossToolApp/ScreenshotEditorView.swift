@@ -148,66 +148,88 @@ struct ScreenshotEditorView: View {
     }
 
     private var editorToolbar: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 5) {
-                ForEach(ScreenshotEditTool.allCases, id: \.self) { tool in
-                    toolButton(tool)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    ForEach(ScreenshotEditTool.allCases, id: \.self) { tool in
+                        toolButton(tool)
+                    }
                 }
+
+                Spacer(minLength: 10)
+
+                HStack(spacing: 4) {
+                    Button {
+                        model.undo()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!model.canUndo || model.activeTextEntry != nil)
+                    .help("撤销（⌘Z）")
+
+                    Button {
+                        model.redo()
+                    } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                    }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!model.canRedo || model.activeTextEntry != nil)
+                    .help("重做（⇧⌘Z）")
+
+                    Button(role: .destructive) {
+                        model.clearAnnotations()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(!model.hasAnnotations && model.activeTextEntry == nil)
+                    .help("清空全部标注")
+                }
+                .buttonStyle(.bordered)
             }
 
             Divider()
-                .frame(height: 28)
 
-            if model.selectedTool != .mosaic {
-                HStack(spacing: 6) {
-                    ForEach(Self.palette, id: \.self) { color in
-                        paletteButton(color)
-                    }
-                    ColorPicker("自定义颜色", selection: selectedColorBinding, supportsOpacity: false)
+            HStack(spacing: 14) {
+                if model.selectedTool != .mosaic {
+                    HStack(spacing: 6) {
+                        ForEach(Self.palette, id: \.self) { color in
+                            paletteButton(color)
+                        }
+                        ColorPicker(
+                            "自定义颜色",
+                            selection: selectedColorBinding,
+                            supportsOpacity: false
+                        )
                         .labelsHidden()
                         .frame(width: 28)
                         .help("自定义颜色")
+                    }
+
+                    Divider()
+                        .frame(height: 24)
                 }
 
-                Divider()
-                    .frame(height: 28)
+                sizeControls
+                Spacer(minLength: 8)
+
+                if model.selectedTool == .sequence {
+                    Text("单击图片自动生成序号，说明文字可选")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                } else if model.selectedTool == .text {
+                    Text("单击图片后输入文字")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
             }
-
-            sizeControls
-
-            Spacer(minLength: 10)
-
-            HStack(spacing: 4) {
-                Button {
-                    model.undo()
-                } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                }
-                .keyboardShortcut("z", modifiers: .command)
-                .disabled(!model.canUndo)
-                .help("撤销（⌘Z）")
-
-                Button {
-                    model.redo()
-                } label: {
-                    Image(systemName: "arrow.uturn.forward")
-                }
-                .keyboardShortcut("z", modifiers: [.command, .shift])
-                .disabled(!model.canRedo)
-                .help("重做（⇧⌘Z）")
-
-                Button(role: .destructive) {
-                    model.clearAnnotations()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .disabled(!model.hasAnnotations)
-                .help("清空全部标注")
-            }
-            .buttonStyle(.bordered)
         }
         .padding(.horizontal, 16)
-        .frame(height: 64)
+        .frame(height: 104)
     }
 
     @ViewBuilder
@@ -229,6 +251,18 @@ struct ScreenshotEditorView: View {
                     .foregroundStyle(.secondary)
                 Slider(value: mosaicPixelSizeBinding, in: 6...42, step: 2)
                     .frame(width: 70)
+            }
+        } else if model.selectedTool == .text || model.selectedTool == .sequence {
+            HStack(spacing: 8) {
+                Text("字号")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(value: $model.textFontSize, in: 18...160, step: 1)
+                    .frame(width: 110)
+                Text("\(Int(model.textFontSize)) px")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 50, alignment: .trailing)
             }
         } else {
             HStack(spacing: 8) {
@@ -253,7 +287,7 @@ struct ScreenshotEditorView: View {
                         .font(.callout)
                         .foregroundStyle(Color.crossToolAccent)
                 } else {
-                    Text("拖动鼠标进行标注；按 S 可贴到屏幕")
+                    Text(footerHint)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -289,10 +323,20 @@ struct ScreenshotEditorView: View {
         .frame(height: 72)
     }
 
+    private var footerHint: String {
+        switch model.selectedTool {
+        case .text:
+            "单击图片输入文字；按 Esc 取消本次输入"
+        case .sequence:
+            "单击图片添加序号并输入说明；按 Esc 取消本次输入"
+        default:
+            "拖动鼠标进行标注；按 S 可贴到屏幕"
+        }
+    }
+
     private func toolButton(_ tool: ScreenshotEditTool) -> some View {
         Button {
-            model.cancelInteraction()
-            model.selectedTool = tool
+            model.selectTool(tool)
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: tool.systemImage)
@@ -301,7 +345,7 @@ struct ScreenshotEditorView: View {
                     .font(.caption2)
             }
             .foregroundStyle(model.selectedTool == tool ? Color.white : Color.primary)
-            .frame(width: 52, height: 44)
+            .frame(width: 50, height: 40)
             .background(
                 model.selectedTool == tool
                     ? Color.crossToolAccent
@@ -311,7 +355,9 @@ struct ScreenshotEditorView: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .help(tool.title)
+        .help(tool.helpText)
+        .accessibilityLabel(tool.title)
+        .accessibilityValue(model.selectedTool == tool ? "已选择" : "未选择")
     }
 
     private func paletteButton(_ color: ScreenshotRGBAColor) -> some View {
@@ -392,11 +438,28 @@ private struct ScreenshotEditorCanvas: View {
                 )
 
                 Rectangle()
-                    .fill(Color.clear)
+                    // A fully transparent SwiftUI shape can be omitted from
+                    // macOS hit testing after the surrounding Canvas redraws.
+                    // Keep an imperceptible alpha so this remains a real event
+                    // surface for every drawing tool.
+                    .fill(Color.white.opacity(0.001))
                     .contentShape(Rectangle())
                     .frame(width: imageRect.width, height: imageRect.height)
                     .position(x: imageRect.midX, y: imageRect.midY)
-                    .gesture(drawingGesture(imageRect: imageRect))
+                    .highPriorityGesture(drawingGesture(imageRect: imageRect))
+                    .accessibilityHidden(true)
+
+                if let entry = model.activeTextEntry {
+                    ScreenshotTextEntryEditor(model: model, entryID: entry.id)
+                        .frame(width: entry.kind == .sequence ? 390 : 300)
+                        .position(
+                            textEditorPosition(
+                                for: entry,
+                                imageRect: imageRect
+                            )
+                        )
+                        .id(entry.id)
+                }
 
                 Rectangle()
                     .stroke(Color.primary.opacity(0.16), lineWidth: 1)
@@ -432,22 +495,51 @@ private struct ScreenshotEditorCanvas: View {
             coordinateSpace: .named(Self.canvasCoordinateSpaceName)
         )
             .onChanged { value in
-                let current = imagePoint(from: value.location, imageRect: imageRect)
-                if model.draftOperation == nil {
-                    let start = imagePoint(from: value.startLocation, imageRect: imageRect)
-                    model.beginInteraction(at: start)
-                }
-                model.updateInteraction(to: current)
+                let router = ScreenshotEditorCanvasInteractionRouter(
+                    coordinateMapper: coordinateMapper(for: imageRect)
+                )
+                perform(router.actions(
+                    for: .changed(
+                        startLocation: displayPoint(value.startLocation),
+                        location: displayPoint(value.location),
+                        hasDraftOperation: model.draftOperation != nil
+                    ),
+                    selectedTool: model.selectedTool
+                ))
             }
             .onEnded { value in
-                model.endInteraction(at: imagePoint(from: value.location, imageRect: imageRect))
+                let router = ScreenshotEditorCanvasInteractionRouter(
+                    coordinateMapper: coordinateMapper(for: imageRect)
+                )
+                perform(router.actions(
+                    for: .ended(
+                        startLocation: displayPoint(value.startLocation),
+                        location: displayPoint(value.location)
+                    ),
+                    selectedTool: model.selectedTool
+                ))
             }
     }
 
-    private func imagePoint(from location: CGPoint, imageRect: CGRect) -> ScreenshotEditPoint {
-        coordinateMapper(for: imageRect).imagePoint(
-            from: ScreenshotEditDisplayPoint(x: Double(location.x), y: Double(location.y))
-        )
+    private func displayPoint(_ point: CGPoint) -> ScreenshotEditDisplayPoint {
+        ScreenshotEditDisplayPoint(x: Double(point.x), y: Double(point.y))
+    }
+
+    private func perform(
+        _ actions: [ScreenshotEditorCanvasInteractionRouter.Action]
+    ) {
+        for action in actions {
+            switch action {
+            case .beginInteraction(let point):
+                model.beginInteraction(at: point)
+            case .updateInteraction(let point):
+                model.updateInteraction(to: point)
+            case .endInteraction(let point):
+                model.endInteraction(at: point)
+            case .beginTextEditing(let point):
+                model.beginTextEditing(at: point)
+            }
+        }
     }
 
     private func coordinateMapper(for imageRect: CGRect) -> ScreenshotEditCoordinateMapper {
@@ -458,6 +550,145 @@ private struct ScreenshotEditorCanvas: View {
             displayHeight: Double(imageRect.height),
             imagePixelWidth: model.pixelWidth,
             imagePixelHeight: model.pixelHeight
+        )
+    }
+
+    private func textEditorPosition(
+        for entry: ScreenshotTextEditingDraft,
+        imageRect: CGRect
+    ) -> CGPoint {
+        let mapper = coordinateMapper(for: imageRect)
+        let mapped = mapper.displayPoint(from: entry.origin)
+        let editorWidth: CGFloat = entry.kind == .sequence ? 390 : 300
+        let editorHeight: CGFloat = 48
+        let markerHeight: CGFloat
+        if entry.kind == .sequence,
+           case .sequence(let annotation) = entry.operation {
+            markerHeight = CGFloat(
+                mapper.displayLength(fromImagePixels: annotation.badgeDiameter)
+            )
+        } else {
+            markerHeight = CGFloat(
+                mapper.displayLength(fromImagePixels: entry.fontSize)
+            )
+        }
+
+        let minimumX = imageRect.minX + editorWidth / 2 + 4
+        let maximumX = imageRect.maxX - editorWidth / 2 - 4
+        let x = minimumX <= maximumX
+            ? min(max(CGFloat(mapped.x) + editorWidth / 2, minimumX), maximumX)
+            : imageRect.midX
+
+        let below = CGFloat(mapped.y) + markerHeight + 8 + editorHeight / 2
+        let above = CGFloat(mapped.y) - 8 - editorHeight / 2
+        let y: CGFloat
+        if below + editorHeight / 2 <= imageRect.maxY - 4 {
+            y = below
+        } else {
+            y = max(imageRect.minY + editorHeight / 2 + 4, above)
+        }
+        return CGPoint(x: x, y: y)
+    }
+}
+
+private struct ScreenshotTextEntryEditor: View {
+    private enum Field: Hashable {
+        case number
+        case text
+    }
+
+    @ObservedObject var model: ScreenshotEditorViewModel
+    let entryID: UUID
+    @FocusState private var focusedField: Field?
+
+    var body: some View {
+        if let entry = model.activeTextEntry, entry.id == entryID {
+            HStack(spacing: 7) {
+                if entry.kind == .sequence {
+                    TextField("1", text: numberBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced).weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .frame(width: 76)
+                        .focused($focusedField, equals: .number)
+                        .onSubmit { focusedField = .text }
+                        .accessibilityLabel("序号")
+                        .accessibilityHint("可输入 1 到 999999，完成后下一项会自动加一")
+                }
+
+                TextField(
+                    entry.kind == .sequence ? "输入说明（可选）" : "输入文字",
+                    text: textBinding
+                )
+                .textFieldStyle(.plain)
+                .focused($focusedField, equals: .text)
+                .onSubmit {
+                    model.commitTextEditing()
+                    focusedField = nil
+                }
+                .accessibilityLabel(
+                    entry.kind == .sequence ? "说明文字" : "标注文字"
+                )
+
+                Button {
+                    model.commitTextEditing()
+                    focusedField = nil
+                } label: {
+                    Image(systemName: "checkmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.crossToolAccent)
+                .help("完成文字标注（Return）")
+                .accessibilityLabel("完成文字标注")
+
+                Button {
+                    model.cancelTextEditing()
+                    focusedField = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("取消本次文字标注（Esc）")
+                .accessibilityLabel("取消本次文字标注")
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.crossToolAccent.opacity(0.75), lineWidth: 1.5)
+            }
+            .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
+            .onExitCommand {
+                model.cancelTextEditing()
+                focusedField = nil
+            }
+            .task(id: entryID) {
+                await Task.yield()
+                guard model.activeTextEntry?.id == entryID else { return }
+                focusedField = .text
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(
+                entry.kind == .sequence
+                    ? "编辑序号 \(entry.resolvedNumber) 和说明文字"
+                    : "编辑文字标注"
+            )
+        }
+    }
+
+    private var textBinding: Binding<String> {
+        Binding(
+            get: { model.activeTextEntry?.text ?? "" },
+            set: { model.updateActiveText($0) }
+        )
+    }
+
+    private var numberBinding: Binding<String> {
+        Binding(
+            get: { model.activeTextEntry?.numberText ?? "" },
+            set: { model.updateActiveSequenceNumber($0) }
         )
     }
 }
@@ -481,6 +712,10 @@ private struct ScreenshotDraftOverlay: View {
                 drawRectangle(annotation, context: &context)
             case .arrow(let annotation):
                 drawArrow(annotation, context: &context)
+            case .text(let annotation):
+                drawText(annotation, context: &context)
+            case .sequence(let annotation):
+                drawSequence(annotation, context: &context)
             }
         }
         .allowsHitTesting(false)
@@ -603,6 +838,68 @@ private struct ScreenshotDraftOverlay: View {
         )
     }
 
+    private func drawText(
+        _ annotation: ScreenshotTextAnnotation,
+        context: inout GraphicsContext
+    ) {
+        guard !annotation.text.isEmpty else { return }
+        context.draw(
+            Text(annotation.text)
+                .font(.system(
+                    size: displayLength(annotation.fontSize),
+                    weight: .medium
+                ))
+                .foregroundStyle(annotation.color.swiftUIColor),
+            at: displayPoint(annotation.origin),
+            anchor: .topLeading
+        )
+    }
+
+    private func drawSequence(
+        _ annotation: ScreenshotSequenceAnnotation,
+        context: inout GraphicsContext
+    ) {
+        let origin = displayPoint(annotation.origin)
+        let diameter = displayLength(annotation.badgeDiameter)
+        let badgeRect = CGRect(
+            x: origin.x,
+            y: origin.y,
+            width: diameter,
+            height: diameter
+        )
+        context.fill(
+            Path(ellipseIn: badgeRect),
+            with: .color(annotation.color.swiftUIColor)
+        )
+        context.draw(
+            Text(String(annotation.number))
+                .font(.system(
+                    size: displayLength(annotation.badgeFontSize),
+                    weight: .bold,
+                    design: .rounded
+                ))
+                .monospacedDigit()
+                .foregroundStyle(annotation.color.contrastingTextColor.swiftUIColor),
+            at: CGPoint(x: badgeRect.midX, y: badgeRect.midY),
+            anchor: .center
+        )
+
+        guard !annotation.text.isEmpty else { return }
+        context.draw(
+            Text(annotation.text)
+                .font(.system(
+                    size: displayLength(annotation.fontSize),
+                    weight: .medium
+                ))
+                .foregroundStyle(annotation.color.swiftUIColor),
+            at: CGPoint(
+                x: badgeRect.maxX + displayLength(annotation.textGap),
+                y: badgeRect.midY
+            ),
+            anchor: .leading
+        )
+    }
+
     private func displayPoint(_ point: ScreenshotEditPoint) -> CGPoint {
         let point = coordinateMapper.displayPoint(from: point)
         return CGPoint(x: point.x, y: point.y)
@@ -631,6 +928,8 @@ private extension ScreenshotEditTool {
         case .mosaic: "马赛克"
         case .rectangle: "矩形"
         case .arrow: "箭头"
+        case .text: "文字"
+        case .sequence: "序号"
         }
     }
 
@@ -640,6 +939,19 @@ private extension ScreenshotEditTool {
         case .mosaic: "square.grid.3x3.fill"
         case .rectangle: "rectangle"
         case .arrow: "arrow.up.right"
+        case .text: "character.cursor.ibeam"
+        case .sequence: "1.circle"
+        }
+    }
+
+    var helpText: String {
+        switch self {
+        case .text:
+            "文字：单击图片后输入"
+        case .sequence:
+            "序号：单击自动递增，可修改数字并输入说明"
+        default:
+            title
         }
     }
 }
@@ -647,5 +959,10 @@ private extension ScreenshotEditTool {
 private extension ScreenshotRGBAColor {
     var swiftUIColor: Color {
         Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
+    }
+
+    var contrastingTextColor: ScreenshotRGBAColor {
+        let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+        return luminance > 0.58 ? .black : .white
     }
 }

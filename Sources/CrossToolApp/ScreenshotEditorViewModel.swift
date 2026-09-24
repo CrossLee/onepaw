@@ -3,16 +3,64 @@ import CrossToolCore
 import Foundation
 import UniformTypeIdentifiers
 
+struct ScreenshotTextEditingDraft: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case text
+        case sequence
+    }
+
+    let id: UUID
+    let kind: Kind
+    let requestedOrigin: ScreenshotEditPoint
+    var origin: ScreenshotEditPoint
+    let fallbackNumber: Int
+    var numberText: String
+    var text: String
+    var color: ScreenshotRGBAColor
+    var fontSize: Double
+
+    var resolvedNumber: Int {
+        Int(numberText) ?? fallbackNumber
+    }
+
+    var operation: ScreenshotEditOperation {
+        switch kind {
+        case .text:
+            return .text(ScreenshotTextAnnotation(
+                id: id,
+                origin: origin,
+                text: text,
+                color: color,
+                fontSize: fontSize
+            ))
+        case .sequence:
+            return .sequence(ScreenshotSequenceAnnotation(
+                id: id,
+                origin: origin,
+                number: resolvedNumber,
+                text: text,
+                color: color,
+                fontSize: fontSize
+            ))
+        }
+    }
+}
+
 @MainActor
 final class ScreenshotEditorViewModel: ObservableObject {
     typealias ShareHandler = @MainActor (Data) throws -> Void
     typealias PinHandler = @MainActor (CGImage) throws -> Void
 
     @Published var selectedTool: ScreenshotEditTool = .pen
-    @Published var selectedColor = ScreenshotRGBAColor(red: 0.96, green: 0.19, blue: 0.23)
+    @Published var selectedColor = ScreenshotRGBAColor(red: 0.96, green: 0.19, blue: 0.23) {
+        didSet { refreshActiveTextStyle() }
+    }
     @Published var lineWidth: Double = 8
     @Published var mosaicBrushDiameter: Double = 48
     @Published var mosaicPixelSize: Double = 18
+    @Published var textFontSize: Double = 48 {
+        didSet { refreshActiveTextStyle() }
+    }
 
     @Published private(set) var previewImage: CGImage
     /// Generated lazily when the user first paints with the mosaic tool.
@@ -20,6 +68,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
     /// second full-resolution bitmap would make merely opening them costly.
     @Published private(set) var mosaicPreviewImage: CGImage?
     @Published private(set) var draftOperation: ScreenshotEditOperation?
+    @Published private(set) var activeTextEntry: ScreenshotTextEditingDraft?
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
     @Published private(set) var hasAnnotations = false
@@ -144,6 +193,9 @@ final class ScreenshotEditorViewModel: ObservableObject {
                 color: selectedColor,
                 lineWidth: lineWidth
             ))
+        case .text, .sequence:
+            beginTextEditing(at: point)
+            return
         }
         refreshDeliveryState()
     }
@@ -156,6 +208,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
         to point: ScreenshotEditPoint,
         forceTerminalPoint: Bool
     ) {
+        guard activeTextEntry == nil else { return }
         guard let draftOperation else { return }
         switch draftOperation {
         case .freehand(let stroke):
@@ -204,10 +257,13 @@ final class ScreenshotEditorViewModel: ObservableObject {
                 color: annotation.color,
                 lineWidth: annotation.lineWidth
             ))
+        case .text, .sequence:
+            return
         }
     }
 
     func endInteraction(at point: ScreenshotEditPoint) {
+        guard activeTextEntry == nil else { return }
         // Sampling thresholds keep long drags efficient, but the terminal
         // point must still land exactly under the pointer for pen and mosaic.
         updateInteraction(to: point, forceTerminalPoint: true)
@@ -223,23 +279,145 @@ final class ScreenshotEditorViewModel: ObservableObject {
     }
 
     func cancelInteraction() {
+        cancelTextEditing()
         draftOperation = nil
         refreshDeliveryState()
     }
 
+    func selectTool(_ tool: ScreenshotEditTool) {
+        if activeTextEntry != nil {
+            _ = commitTextEditing()
+        } else {
+            draftOperation = nil
+            refreshDeliveryState()
+        }
+        selectedTool = tool
+    }
+
+    func beginTextEditing(at point: ScreenshotEditPoint) {
+        guard selectedTool == .text || selectedTool == .sequence else { return }
+        if activeTextEntry != nil {
+            _ = commitTextEditing()
+        }
+
+        let nextNumber = nextSequenceNumber
+        let kind: ScreenshotTextEditingDraft.Kind = selectedTool == .sequence
+            ? .sequence
+            : .text
+        activeTextEntry = ScreenshotTextEditingDraft(
+            id: UUID(),
+            kind: kind,
+            requestedOrigin: point,
+            origin: clampedTextOrigin(
+                point,
+                kind: kind,
+                number: nextNumber,
+                fontSize: textFontSize
+            ),
+            fallbackNumber: nextNumber,
+            numberText: String(nextNumber),
+            text: "",
+            color: selectedColor,
+            fontSize: textFontSize
+        )
+        rebuildActiveTextDraft()
+        statusMessage = selectedTool == .sequence
+            ? "已创建序号 \(nextNumber)，可继续输入说明"
+            : "请输入文字，按 Return 完成"
+    }
+
+    func updateActiveText(_ value: String) {
+        guard var entry = activeTextEntry else { return }
+        entry.text = Self.normalizedSingleLine(value, maximumCharacters: 500)
+        activeTextEntry = entry
+        rebuildActiveTextDraft()
+    }
+
+    func updateActiveSequenceNumber(_ value: String) {
+        guard var entry = activeTextEntry, entry.kind == .sequence else { return }
+        let digits = value.filter { character in
+            guard character.unicodeScalars.count == 1,
+                  let scalar = character.unicodeScalars.first else {
+                return false
+            }
+            return (48...57).contains(scalar.value)
+        }
+        entry.numberText = String(digits.prefix(6))
+        entry.origin = clampedTextOrigin(
+            entry.requestedOrigin,
+            kind: entry.kind,
+            number: entry.resolvedNumber,
+            fontSize: entry.fontSize
+        )
+        activeTextEntry = entry
+        rebuildActiveTextDraft()
+    }
+
+    @discardableResult
+    func commitTextEditing() -> Bool {
+        guard var entry = activeTextEntry else { return false }
+        activeTextEntry = nil
+        draftOperation = nil
+
+        entry.text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entry.kind == .text, entry.text.isEmpty {
+            statusMessage = nil
+            refreshDeliveryState()
+            return false
+        }
+
+        if entry.kind == .sequence {
+            let number = min(max(entry.resolvedNumber, 1), 999_999)
+            entry.numberText = String(number)
+        }
+        history.commit(entry.operation)
+        rebuildPreview()
+        statusMessage = entry.kind == .sequence
+            ? "已添加序号 \(entry.resolvedNumber)"
+            : "已添加文字"
+        return true
+    }
+
+    @discardableResult
+    func cancelTextEditing() -> Bool {
+        guard activeTextEntry != nil else { return false }
+        activeTextEntry = nil
+        draftOperation = nil
+        statusMessage = nil
+        refreshDeliveryState()
+        return true
+    }
+
+    var nextSequenceNumber: Int {
+        for operation in history.operations.reversed() {
+            if case .sequence(let annotation) = operation {
+                guard annotation.number < 999_999 else { return 999_999 }
+                return max(annotation.number + 1, 1)
+            }
+        }
+        return 1
+    }
+
+    var committedOperations: [ScreenshotEditOperation] {
+        history.operations
+    }
+
     func undo() {
+        if cancelTextEditing() { return }
         draftOperation = nil
         guard history.undo() != nil else { return }
         rebuildPreview()
     }
 
     func redo() {
+        guard activeTextEntry == nil else { return }
         draftOperation = nil
         guard history.redo() != nil else { return }
         rebuildPreview()
     }
 
     func clearAnnotations() {
+        _ = cancelTextEditing()
         guard !history.operations.isEmpty else { return }
         draftOperation = nil
         history.reset()
@@ -258,6 +436,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
     }
 
     func copyToPasteboard() {
+        _ = commitTextEditing()
         do {
             let data = try ScreenshotEditorRenderer.pngData(from: previewImage)
             let image = NSImage(
@@ -273,7 +452,9 @@ final class ScreenshotEditorViewModel: ObservableObject {
     }
 
     func pinCurrentImage() {
-        cancelInteraction()
+        _ = commitTextEditing()
+        draftOperation = nil
+        refreshDeliveryState()
         guard let onPinImage else {
             statusMessage = "当前无法创建悬浮贴图"
             return
@@ -289,6 +470,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
     }
 
     func saveAsPNG() {
+        _ = commitTextEditing()
         let panel = NSSavePanel()
         panel.title = "保存截图"
         panel.nameFieldLabel = "文件名："
@@ -311,6 +493,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
     }
 
     func addToShare() {
+        _ = commitTextEditing()
         do {
             let data = try ScreenshotEditorRenderer.pngData(from: previewImage)
             try onSharePNG(data)
@@ -414,6 +597,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
 
     private func refreshDeliveryState() {
         hasDeliveredOutput = draftOperation == nil
+            && activeTextEntry == nil
             && deliveredOperations == history.operations
     }
 
@@ -445,6 +629,73 @@ final class ScreenshotEditorViewModel: ObservableObject {
                 annotation.end.x - annotation.start.x,
                 annotation.end.y - annotation.start.y
             ) >= 1
+        case .text(let annotation):
+            return !annotation.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .sequence:
+            return true
         }
+    }
+
+    private func refreshActiveTextStyle() {
+        guard var entry = activeTextEntry else { return }
+        entry.color = selectedColor
+        entry.fontSize = textFontSize
+        entry.origin = clampedTextOrigin(
+            entry.requestedOrigin,
+            kind: entry.kind,
+            number: entry.resolvedNumber,
+            fontSize: entry.fontSize
+        )
+        activeTextEntry = entry
+        rebuildActiveTextDraft()
+    }
+
+    private func rebuildActiveTextDraft() {
+        guard let activeTextEntry else { return }
+        draftOperation = activeTextEntry.operation
+        refreshDeliveryState()
+    }
+
+    private func clampedTextOrigin(
+        _ point: ScreenshotEditPoint,
+        kind: ScreenshotTextEditingDraft.Kind,
+        number: Int,
+        fontSize: Double
+    ) -> ScreenshotEditPoint {
+        let markerWidth: Double
+        let markerHeight: Double
+        switch kind {
+        case .text:
+            // Keep at least the first glyph visible when the user clicks the
+            // right or bottom image edge. Longer labels may still be clipped
+            // naturally by the source image bounds.
+            markerWidth = max(12, fontSize * 0.7)
+            markerHeight = max(18, fontSize * 1.2)
+        case .sequence:
+            let annotation = ScreenshotSequenceAnnotation(
+                origin: point,
+                number: number,
+                color: selectedColor,
+                fontSize: fontSize
+            )
+            markerWidth = annotation.badgeDiameter
+            markerHeight = annotation.badgeDiameter
+        }
+
+        return ScreenshotEditPoint(
+            x: min(max(point.x, 0), max(0, Double(pixelWidth) - markerWidth)),
+            y: min(max(point.y, 0), max(0, Double(pixelHeight) - markerHeight))
+        )
+    }
+
+    private static func normalizedSingleLine(
+        _ value: String,
+        maximumCharacters: Int
+    ) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        return String(normalized.prefix(maximumCharacters))
     }
 }

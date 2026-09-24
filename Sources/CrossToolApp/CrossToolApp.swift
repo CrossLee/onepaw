@@ -141,6 +141,21 @@ private struct MenuBarStatusBadgeGlyph: View {
 }
 
 @MainActor
+final class OnePawMainWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        guard attachedSheet == nil else {
+            super.cancelOperation(sender)
+            return
+        }
+
+        // Escape arrives here only after the focused control has declined to
+        // consume it. Closing this retained window leaves the menu-bar app,
+        // sharing server, recordings, and pinned screenshots running.
+        close()
+    }
+}
+
+@MainActor
 final class MainWindowPresenter: ObservableObject {
     private var windowController: NSWindowController?
 
@@ -174,7 +189,7 @@ final class MainWindowPresenter: ObservableObject {
                 model.refreshScreenCapturePermission()
             }
         let hostingController = NSHostingController(rootView: rootView)
-        let window = NSWindow(contentViewController: hostingController)
+        let window = OnePawMainWindow(contentViewController: hostingController)
         window.title = ApplicationBrand.displayName
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 1_180, height: 780))

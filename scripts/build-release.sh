@@ -30,7 +30,7 @@ Usage: ./scripts/build-release.sh [--skip-notarization]
 Builds Developer ID signed release artifacts:
   - a ZIP containing the notarized and stapled 一爪.app
   - a notarized and stapled OnePaw-*.dmg for drag-to-Applications install
-  - a notarized and stapled 一爪-*.pkg installer (recommended for old-name upgrades)
+  - a notarized and stapled OnePaw-*.pkg installer (recommended for old-name upgrades)
   - SHA256SUMS.txt
 
 Environment:

@@ -50,7 +50,8 @@ enum ScreenshotEditorCopyShortcut {
         for event: NSEvent,
         isKeyWindow: Bool,
         hasAttachedSheet: Bool,
-        hasSelectedText: Bool
+        hasSelectedText: Bool,
+        isEditingText: Bool
     ) -> Decision {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard event.type == .keyDown,
@@ -60,10 +61,39 @@ enum ScreenshotEditorCopyShortcut {
               event.charactersIgnoringModifiers?.lowercased() == "c" else {
             return .ignore
         }
-        if hasSelectedText {
+        if isEditingText || hasSelectedText {
             return .forwardToTextResponder
         }
         return event.isARepeat ? .consume : .copyImage
+    }
+}
+
+enum ScreenshotEditorTextEditingEscapeShortcut {
+    enum Phase: Equatable {
+        case keyDown
+        case keyUp
+    }
+
+    private static let disallowedModifiers: NSEvent.ModifierFlags = [
+        .command,
+        .control,
+        .option,
+        .shift,
+        .function,
+    ]
+
+    static func phase(for event: NSEvent) -> Phase? {
+        // NSEvent.keyCode is only valid for key events. Reading it from a
+        // mouse event raises an AppKit assertion and prevents that event from
+        // reaching the SwiftUI canvas.
+        guard event.type == .keyDown || event.type == .keyUp else {
+            return nil
+        }
+        guard event.keyCode == 53,
+              event.modifierFlags.intersection(disallowedModifiers).isEmpty else {
+            return nil
+        }
+        return event.type == .keyDown ? .keyDown : .keyUp
     }
 }
 
@@ -71,14 +101,23 @@ enum ScreenshotEditorCopyShortcut {
 final class ScreenshotEditorWindow: NSWindow {
     var onBareSPin: (() -> Void)?
     var onCommandCCopyImage: (() -> Void)?
+    var isTextAnnotationEditing: (() -> Bool)?
+    var onCancelTextEditing: (() -> Bool)?
+    private var consumesTextEditingEscapeUntilKeyUp = false
 
     override func sendEvent(_ event: NSEvent) {
         let textView = firstResponder as? NSTextView
+        if handleTextEditingEscape(event, textView: textView) {
+            return
+        }
+        let isEditingText = textView?.isEditable == true
+            || isTextAnnotationEditing?() == true
         switch ScreenshotEditorCopyShortcut.decision(
             for: event,
             isKeyWindow: isKeyWindow,
             hasAttachedSheet: attachedSheet != nil,
-            hasSelectedText: (textView?.selectedRange().length ?? 0) > 0
+            hasSelectedText: (textView?.selectedRange().length ?? 0) > 0,
+            isEditingText: isEditingText
         ) {
         case .ignore:
             break
@@ -100,7 +139,7 @@ final class ScreenshotEditorWindow: NSWindow {
             for: event,
             isKeyWindow: isKeyWindow,
             hasAttachedSheet: attachedSheet != nil,
-            isEditingText: textView?.isEditable == true
+            isEditingText: isEditingText
         ) {
         case .ignore:
             super.sendEvent(event)
@@ -115,6 +154,35 @@ final class ScreenshotEditorWindow: NSWindow {
             }
             onBareSPin()
         }
+    }
+
+    private func handleTextEditingEscape(
+        _ event: NSEvent,
+        textView: NSTextView?
+    ) -> Bool {
+        guard let phase = ScreenshotEditorTextEditingEscapeShortcut.phase(for: event) else {
+            return false
+        }
+        if phase == .keyUp, consumesTextEditingEscapeUntilKeyUp {
+            consumesTextEditingEscapeUntilKeyUp = false
+            return true
+        }
+        guard phase == .keyDown else { return false }
+        if consumesTextEditingEscapeUntilKeyUp {
+            return true
+        }
+        guard isKeyWindow,
+              attachedSheet == nil,
+              isTextAnnotationEditing?() == true else {
+            return false
+        }
+        if textView?.hasMarkedText() == true {
+            return false
+        }
+        guard onCancelTextEditing?() == true else { return false }
+        consumesTextEditingEscapeUntilKeyUp = true
+        makeFirstResponder(nil)
+        return true
     }
 }
 
@@ -239,6 +307,12 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
         window.onCommandCCopyImage = { [weak self] in
             self?.editorModel.copyToPasteboard()
         }
+        window.isTextAnnotationEditing = { [weak model] in
+            model?.activeTextEntry != nil
+        }
+        window.onCancelTextEditing = { [weak model] in
+            model?.cancelTextEditing() ?? false
+        }
         model.presentingWindow = window
         installPinButton()
         model.requestClose = { [weak self] in
@@ -310,6 +384,8 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
         if let editorWindow = window as? ScreenshotEditorWindow {
             editorWindow.onBareSPin = nil
             editorWindow.onCommandCCopyImage = nil
+            editorWindow.isTextAnnotationEditing = nil
+            editorWindow.onCancelTextEditing = nil
         }
         window?.delegate = nil
         let handler = onClose
