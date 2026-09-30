@@ -6,6 +6,8 @@ import CrossToolCore
 import Foundation
 import ImageIO
 
+private let screenshotEditorMaximumPixelCount = 50_000_000
+
 enum ScreenshotEditorRenderError: LocalizedError {
     case unreadableImage
     case unsupportedImageSize
@@ -26,15 +28,43 @@ enum ScreenshotEditorRenderError: LocalizedError {
     }
 }
 
+struct ScreenshotEditorImageMetadata: Equatable, Sendable {
+    let pixelWidth: Int
+    let pixelHeight: Int
+}
+
+/// `CGImage` instances are immutable and Core Graphics permits them to be used
+/// across threads. The SDK does not currently declare that contract as
+/// `Sendable`, so keep the unchecked boundary in this small value wrapper.
+struct ScreenshotEditorDecodedImage: @unchecked Sendable {
+    let image: CGImage
+}
+
+/// ImageIO does not expose mid-decode cancellation. Serializing full screenshot
+/// decodes prevents a close-and-recapture sequence from piling several large
+/// HDR images onto the global executor. Cancellation is checked both before
+/// and after the unavoidable synchronous ImageIO call, so queued or completed
+/// work is discarded promptly.
+private actor ScreenshotEditorImageDecodeQueue {
+    func decode(at imageURL: URL) throws -> ScreenshotEditorDecodedImage {
+        try Task.checkCancellation()
+        let decodedImage = try ScreenshotEditorRenderer.decodeImageSynchronously(
+            at: imageURL
+        )
+        try Task.checkCancellation()
+        return decodedImage
+    }
+}
+
+private let screenshotEditorImageDecodeQueue = ScreenshotEditorImageDecodeQueue()
+
 @MainActor
 final class ScreenshotEditorRenderer {
-    private static let maximumPixelCount = 50_000_000
-
     let originalImage: CGImage
     let pixelWidth: Int
     let pixelHeight: Int
 
-    private let ciContext = CIContext(options: [
+    private lazy var ciContext = CIContext(options: [
         .cacheIntermediates: false,
         .useSoftwareRenderer: false
     ])
@@ -42,9 +72,54 @@ final class ScreenshotEditorRenderer {
     // megabytes, so caching every slider step would quickly exhaust memory.
     private var cachedMosaic: (pixelSize: Int, image: CGImage)?
 
-    init(imageURL: URL) throws {
+    convenience init(imageURL: URL) throws {
+        try self.init(decodedImage: Self.decodeImageSynchronously(at: imageURL))
+    }
+
+    init(decodedImage: ScreenshotEditorDecodedImage) throws {
+        let image = decodedImage.image
+        try Self.validate(pixelWidth: image.width, pixelHeight: image.height)
+
+        originalImage = image
+        pixelWidth = image.width
+        pixelHeight = image.height
+    }
+
+    nonisolated static func imageMetadata(at imageURL: URL) throws -> ScreenshotEditorImageMetadata {
         guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, [
-            kCGImageSourceShouldCacheImmediately: true
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: false
+        ] as CFDictionary),
+        let properties = CGImageSourceCopyPropertiesAtIndex(
+            source,
+            0,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+        ) as? [CFString: Any],
+        let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+        let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
+            throw ScreenshotEditorRenderError.unreadableImage
+        }
+
+        let metadata = ScreenshotEditorImageMetadata(
+            pixelWidth: width.intValue,
+            pixelHeight: height.intValue
+        )
+        try validate(
+            pixelWidth: metadata.pixelWidth,
+            pixelHeight: metadata.pixelHeight
+        )
+        return metadata
+    }
+
+    nonisolated static func decodeImage(at imageURL: URL) async throws -> ScreenshotEditorDecodedImage {
+        try await screenshotEditorImageDecodeQueue.decode(at: imageURL)
+    }
+
+    nonisolated fileprivate static func decodeImageSynchronously(
+        at imageURL: URL
+    ) throws -> ScreenshotEditorDecodedImage {
+        guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, [
+            kCGImageSourceShouldCache: false
         ] as CFDictionary),
         let image = CGImageSourceCreateImageAtIndex(source, 0, [
             kCGImageSourceShouldCacheImmediately: true,
@@ -52,16 +127,19 @@ final class ScreenshotEditorRenderer {
         ] as CFDictionary) else {
             throw ScreenshotEditorRenderError.unreadableImage
         }
+        try validate(pixelWidth: image.width, pixelHeight: image.height)
+        return ScreenshotEditorDecodedImage(image: image)
+    }
 
-        guard image.width > 0, image.height > 0,
-              image.width <= 32_768, image.height <= 32_768,
-              image.width * image.height <= Self.maximumPixelCount else {
+    nonisolated private static func validate(
+        pixelWidth: Int,
+        pixelHeight: Int
+    ) throws {
+        guard pixelWidth > 0, pixelHeight > 0,
+              pixelWidth <= 32_768, pixelHeight <= 32_768,
+              pixelWidth * pixelHeight <= screenshotEditorMaximumPixelCount else {
             throw ScreenshotEditorRenderError.unsupportedImageSize
         }
-
-        originalImage = image
-        pixelWidth = image.width
-        pixelHeight = image.height
     }
 
     func render(operations: [ScreenshotEditOperation]) throws -> CGImage {

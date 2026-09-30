@@ -86,6 +86,15 @@ enum ScreenshotServiceError: LocalizedError {
     }
 }
 
+enum ScreenshotPermissionPreflightPolicy {
+    static func needsCheck(
+        mode: ScreenshotMode,
+        permissionWasPreflighted: Bool
+    ) -> Bool {
+        mode.requiresPersistentScreenCapturePermission && !permissionWasPreflighted
+    }
+}
+
 enum ScreenCapturePermissionRequestResult {
     case contentAvailable
     case userDeclined
@@ -125,8 +134,14 @@ final class ScreenshotService: @unchecked Sendable {
     }
 
     @MainActor
-    func capture(_ mode: ScreenshotMode) async throws -> URL {
-        guard !mode.requiresPersistentScreenCapturePermission || hasPermission else {
+    func capture(
+        _ mode: ScreenshotMode,
+        permissionWasPreflighted: Bool = false
+    ) async throws -> URL {
+        guard !ScreenshotPermissionPreflightPolicy.needsCheck(
+            mode: mode,
+            permissionWasPreflighted: permissionWasPreflighted
+        ) || hasPermission else {
             throw ScreenshotServiceError.permissionDenied
         }
 

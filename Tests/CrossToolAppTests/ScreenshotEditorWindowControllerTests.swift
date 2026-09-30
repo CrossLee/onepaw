@@ -320,15 +320,19 @@ struct ScreenshotEditorWindowControllerTests {
     }
 
     @Test("Title-bar pin creates one detached image and closes the normal editor")
-    func titleBarPinCreatesDetachedImage() throws {
+    func titleBarPinCreatesDetachedImage() async throws {
         let sourceURL = try makeTemporaryPNG()
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
         var pinCount = 0
+        var pinnedPixelSize: CGSize?
         var closeCount = 0
         let controller = try ScreenshotEditorWindowController(
             sourceURL: sourceURL,
-            onPinImage: { _ in pinCount += 1 },
+            onPinImage: { image in
+                pinCount += 1
+                pinnedPixelSize = CGSize(width: image.width, height: image.height)
+            },
             onSharePNG: { _ in },
             onClose: { closeCount += 1 }
         )
@@ -337,7 +341,9 @@ struct ScreenshotEditorWindowControllerTests {
             window.delegate = nil
             window.close()
         }
-        window.orderFront(nil)
+        _ = controller.show()
+        await controller.waitUntilImageLoadFinishes()
+        #expect(controller.isEditorReady)
 
         let accessory = try #require(window.titlebarAccessoryViewControllers.first)
         let button = try #require(accessory.view.subviews.compactMap { $0 as? NSButton }.first)
@@ -359,13 +365,14 @@ struct ScreenshotEditorWindowControllerTests {
         button.performClick(nil)
 
         #expect(pinCount == 1)
+        #expect(pinnedPixelSize == CGSize(width: 2, height: 2))
         #expect(closeCount == 1)
         #expect(window.level == .normal)
         #expect(!window.isVisible)
     }
 
     @Test("A failed pin keeps the normal editor window open")
-    func failedPinKeepsEditorOpen() throws {
+    func failedPinKeepsEditorOpen() async throws {
         let sourceURL = try makeTemporaryPNG()
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
@@ -385,7 +392,9 @@ struct ScreenshotEditorWindowControllerTests {
             window.delegate = nil
             window.close()
         }
-        window.orderFront(nil)
+        _ = controller.show()
+        await controller.waitUntilImageLoadFinishes()
+        #expect(controller.isEditorReady)
         let accessory = try #require(window.titlebarAccessoryViewControllers.first)
         let button = try #require(accessory.view.subviews.compactMap { $0 as? NSButton }.first)
 

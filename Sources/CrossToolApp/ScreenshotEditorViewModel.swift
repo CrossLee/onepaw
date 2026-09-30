@@ -98,7 +98,7 @@ final class ScreenshotEditorViewModel: ObservableObject {
     private var textRecognitionTask: Task<Void, Never>?
     private var textRecognitionRequestID: UUID?
 
-    init(
+    convenience init(
         sourceURL: URL,
         originalWasAutomaticallyCopied: Bool = false,
         pasteboardWriter: (any ScreenshotPasteboardWriting)? = nil,
@@ -108,6 +108,51 @@ final class ScreenshotEditorViewModel: ObservableObject {
         onSharePNG: @escaping ShareHandler
     ) throws {
         let renderer = try ScreenshotEditorRenderer(imageURL: sourceURL)
+        self.init(
+            sourceURL: sourceURL,
+            renderer: renderer,
+            originalWasAutomaticallyCopied: originalWasAutomaticallyCopied,
+            pasteboardWriter: pasteboardWriter,
+            textRecognizer: textRecognizer,
+            textPasteboardWriter: textPasteboardWriter,
+            onPinImage: onPinImage,
+            onSharePNG: onSharePNG
+        )
+    }
+
+    convenience init(
+        sourceURL: URL,
+        decodedImage: ScreenshotEditorDecodedImage,
+        originalWasAutomaticallyCopied: Bool = false,
+        pasteboardWriter: (any ScreenshotPasteboardWriting)? = nil,
+        textRecognizer: (any ScreenshotTextRecognizing)? = nil,
+        textPasteboardWriter: (any ScreenshotTextPasteboardWriting)? = nil,
+        onPinImage: PinHandler? = nil,
+        onSharePNG: @escaping ShareHandler
+    ) throws {
+        let renderer = try ScreenshotEditorRenderer(decodedImage: decodedImage)
+        self.init(
+            sourceURL: sourceURL,
+            renderer: renderer,
+            originalWasAutomaticallyCopied: originalWasAutomaticallyCopied,
+            pasteboardWriter: pasteboardWriter,
+            textRecognizer: textRecognizer,
+            textPasteboardWriter: textPasteboardWriter,
+            onPinImage: onPinImage,
+            onSharePNG: onSharePNG
+        )
+    }
+
+    private init(
+        sourceURL: URL,
+        renderer: ScreenshotEditorRenderer,
+        originalWasAutomaticallyCopied: Bool,
+        pasteboardWriter: (any ScreenshotPasteboardWriting)?,
+        textRecognizer: (any ScreenshotTextRecognizing)?,
+        textPasteboardWriter: (any ScreenshotTextPasteboardWriting)?,
+        onPinImage: PinHandler?,
+        onSharePNG: @escaping ShareHandler
+    ) {
         self.sourceURL = sourceURL
         self.renderer = renderer
         self.onSharePNG = onSharePNG

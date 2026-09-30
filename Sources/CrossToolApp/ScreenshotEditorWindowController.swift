@@ -1,6 +1,42 @@
 import AppKit
 import SwiftUI
 
+private struct ScreenshotEditorLoadingView: View {
+    let metadata: ScreenshotEditorImageMetadata
+    let failureMessage: String?
+
+    var body: some View {
+        VStack(spacing: 14) {
+            if let failureMessage {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundStyle(.orange)
+                Text("无法载入截图")
+                    .font(.headline)
+                Text(failureMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+                Text("请关闭窗口后重新截图")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ProgressView()
+                    .controlSize(.regular)
+                Text("正在载入截图…")
+                    .font(.headline)
+                Text("原图尺寸 \(metadata.pixelWidth) × \(metadata.pixelHeight)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
 enum ScreenshotEditorPinShortcut {
     enum Decision: Equatable {
         case ignore
@@ -264,31 +300,51 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
     typealias ShareHandler = @MainActor (Data) throws -> Void
     typealias PinHandler = @MainActor (CGImage) throws -> Void
     typealias CloseHandler = @MainActor () -> Void
+    typealias ImageLoader = @Sendable (URL) async throws -> ScreenshotEditorDecodedImage
 
-    private let editorModel: ScreenshotEditorViewModel
+    private let sourceURL: URL
+    private let imageMetadata: ScreenshotEditorImageMetadata
+    private let originalWasAutomaticallyCopied: Bool
+    private let onPinImage: PinHandler?
+    private let onSharePNG: ShareHandler
+    private let imageLoader: ImageLoader
+    private var editorModel: ScreenshotEditorViewModel?
     private let pinButton: NSButton
     private var onClose: CloseHandler?
+    private var imageLoadingTask: Task<Void, Never>?
+    private(set) var imageLoadErrorMessage: String?
     private var allowsClose = false
     private var closeConfirmationIsVisible = false
+    private var isClosing = false
+
+    var isEditorReady: Bool {
+        editorModel != nil
+    }
 
     init(
         sourceURL: URL,
         originalWasAutomaticallyCopied: Bool = false,
         onPinImage: PinHandler? = nil,
         onSharePNG: @escaping ShareHandler,
-        onClose: @escaping CloseHandler
+        onClose: @escaping CloseHandler,
+        imageLoader: @escaping ImageLoader = { imageURL in
+            try await ScreenshotEditorRenderer.decodeImage(at: imageURL)
+        }
     ) throws {
-        let model = try ScreenshotEditorViewModel(
-            sourceURL: sourceURL,
-            originalWasAutomaticallyCopied: originalWasAutomaticallyCopied,
-            onPinImage: onPinImage,
-            onSharePNG: onSharePNG
-        )
-        editorModel = model
+        let imageMetadata = try ScreenshotEditorRenderer.imageMetadata(at: sourceURL)
+        self.sourceURL = sourceURL
+        self.imageMetadata = imageMetadata
+        self.originalWasAutomaticallyCopied = originalWasAutomaticallyCopied
+        self.onPinImage = onPinImage
+        self.onSharePNG = onSharePNG
+        self.imageLoader = imageLoader
         pinButton = NSButton()
         self.onClose = onClose
 
-        let hostingController = NSHostingController(rootView: ScreenshotEditorView(model: model))
+        let hostingController = NSHostingController(rootView: ScreenshotEditorLoadingView(
+            metadata: imageMetadata,
+            failureMessage: nil
+        ))
         let window = ScreenshotEditorWindow(contentViewController: hostingController)
         window.title = "编辑截图 — 一爪"
         window.setContentSize(NSSize(width: 1120, height: 760))
@@ -301,23 +357,7 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
 
         super.init(window: window)
         window.delegate = self
-        window.onBareSPin = { [weak self] in
-            self?.editorModel.pinCurrentImage()
-        }
-        window.onCommandCCopyImage = { [weak self] in
-            self?.editorModel.copyToPasteboard()
-        }
-        window.isTextAnnotationEditing = { [weak model] in
-            model?.activeTextEntry != nil
-        }
-        window.onCancelTextEditing = { [weak model] in
-            model?.cancelTextEditing() ?? false
-        }
-        model.presentingWindow = window
         installPinButton()
-        model.requestClose = { [weak self] in
-            self?.window?.performClose(nil)
-        }
     }
 
     @available(*, unavailable)
@@ -346,10 +386,18 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        startImageLoadingIfNeeded()
+    }
+
+    func waitUntilImageLoadFinishes() async {
+        let task = imageLoadingTask
+        await task?.value
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard !allowsClose, !editorModel.hasDeliveredOutput else {
+        let hasDeliveredOutput = editorModel?.hasDeliveredOutput
+            ?? originalWasAutomaticallyCopied
+        guard !allowsClose, !hasDeliveredOutput else {
             return true
         }
         guard !closeConfirmationIsVisible else { return false }
@@ -357,11 +405,11 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        if editorModel.hasAnyDeliveredOutput {
+        if editorModel?.hasAnyDeliveredOutput ?? originalWasAutomaticallyCopied {
             alert.messageText = "关闭并放弃尚未输出的标注？"
             alert.informativeText = "原始截图已自动复制到剪贴板，但当前标注尚未复制、保存或加入课堂共享区。关闭后会删除本次临时截图和标注。"
         } else {
-            alert.messageText = editorModel.hasAnnotations
+            alert.messageText = editorModel?.hasAnnotations == true
                 ? "关闭并放弃本次截图和标注？"
                 : "关闭并放弃本次截图？"
             alert.informativeText = "这张截图尚未复制、保存或加入课堂共享区。关闭后会删除本次临时截图。"
@@ -379,8 +427,11 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
     }
 
     func windowWillClose(_ notification: Notification) {
-        editorModel.cancelTextRecognition()
-        editorModel.cancelInteraction()
+        isClosing = true
+        imageLoadingTask?.cancel()
+        imageLoadingTask = nil
+        editorModel?.cancelTextRecognition()
+        editorModel?.cancelInteraction()
         if let editorWindow = window as? ScreenshotEditorWindow {
             editorWindow.onBareSPin = nil
             editorWindow.onCommandCCopyImage = nil
@@ -413,6 +464,7 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
         )
         pinButton.contentTintColor = .secondaryLabelColor
         pinButton.toolTip = "贴到屏幕（S）"
+        pinButton.isEnabled = false
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 38, height: 28))
         container.addSubview(pinButton)
@@ -431,6 +483,79 @@ final class ScreenshotEditorWindowController: NSWindowController, NSWindowDelega
 
     @objc
     private func pinCurrentImage(_ sender: NSButton) {
-        editorModel.pinCurrentImage()
+        editorModel?.pinCurrentImage()
+    }
+
+    private func startImageLoadingIfNeeded() {
+        guard editorModel == nil,
+              imageLoadingTask == nil,
+              imageLoadErrorMessage == nil,
+              !isClosing else {
+            return
+        }
+
+        let sourceURL = sourceURL
+        let imageLoader = imageLoader
+        imageLoadingTask = Task { @MainActor [weak self] in
+            do {
+                let decodedImage = try await imageLoader(sourceURL)
+                try Task.checkCancellation()
+                guard let self, !self.isClosing else { return }
+                try self.installEditor(decodedImage: decodedImage)
+            } catch is CancellationError {
+                // Closing the window cancels any decode still in flight.
+            } catch {
+                guard let self, !self.isClosing else { return }
+                self.presentImageLoadFailure(error)
+            }
+            self?.imageLoadingTask = nil
+        }
+    }
+
+    private func installEditor(decodedImage: ScreenshotEditorDecodedImage) throws {
+        guard let window else { return }
+        let model = try ScreenshotEditorViewModel(
+            sourceURL: sourceURL,
+            decodedImage: decodedImage,
+            originalWasAutomaticallyCopied: originalWasAutomaticallyCopied,
+            onPinImage: onPinImage,
+            onSharePNG: onSharePNG
+        )
+        editorModel = model
+        model.presentingWindow = window
+        model.requestClose = { [weak self] in
+            self?.window?.performClose(nil)
+        }
+
+        if let editorWindow = window as? ScreenshotEditorWindow {
+            editorWindow.onBareSPin = { [weak model] in
+                model?.pinCurrentImage()
+            }
+            editorWindow.onCommandCCopyImage = { [weak model] in
+                model?.copyToPasteboard()
+            }
+            editorWindow.isTextAnnotationEditing = { [weak model] in
+                model?.activeTextEntry != nil
+            }
+            editorWindow.onCancelTextEditing = { [weak model] in
+                model?.cancelTextEditing() ?? false
+            }
+        }
+
+        window.contentViewController = NSHostingController(
+            rootView: ScreenshotEditorView(model: model)
+        )
+        pinButton.isEnabled = true
+    }
+
+    private func presentImageLoadFailure(_ error: Error) {
+        imageLoadErrorMessage = error.localizedDescription
+        pinButton.isEnabled = false
+        window?.contentViewController = NSHostingController(
+            rootView: ScreenshotEditorLoadingView(
+                metadata: imageMetadata,
+                failureMessage: error.localizedDescription
+            )
+        )
     }
 }
