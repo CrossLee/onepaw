@@ -10,6 +10,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case recording
     case colorSampler
     case translation
+    case developerTools
     case sharing
     case inbox
     case history
@@ -25,6 +26,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .recording: return "录屏"
         case .colorSampler: return "提取颜色"
         case .translation: return "翻译"
+        case .developerTools: return "开发工具"
         case .sharing: return "课堂共享区"
         case .inbox: return "学生上传"
         case .history: return "历史记录"
@@ -40,6 +42,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .recording: return "record.circle"
         case .colorSampler: return "eyedropper"
         case .translation: return "bubble.left.and.bubble.right"
+        case .developerTools: return "chevron.left.forwardslash.chevron.right"
         case .sharing: return "point.3.connected.trianglepath.dotted"
         case .inbox: return "tray.and.arrow.down"
         case .history: return "clock.arrow.circlepath"
@@ -106,6 +109,8 @@ struct MainWindowView: View {
             ColorSamplerPage(model: model.colorSampler)
         case .translation:
             TextTranslationPage()
+        case .developerTools:
+            DeveloperToolsPage(model: model.developerTools)
         case .sharing:
             SharingPage()
         case .inbox:
@@ -197,6 +202,12 @@ private struct DashboardView: View {
                             ?? "端侧翻译，不上传文字",
                         systemImage: "bubble.left.and.bubble.right"
                     ) { model.presentTextTranslation() }
+
+                    QuickActionCard(
+                        title: "开发工具",
+                        subtitle: "JSON 格式化、Base64 编码、UUID 生成",
+                        systemImage: "chevron.left.forwardslash.chevron.right"
+                    ) { model.presentDeveloperTools() }
 
                     QuickActionCard(
                         title: "分享文件",

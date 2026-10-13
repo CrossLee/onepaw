@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessionToken: String
     @Published private(set) var usesCustomShareAccessCode: Bool
     let colorSampler = ColorSamplerViewModel()
+    let developerTools = DeveloperToolsFeatureModel()
     let imageCompression = ImageCompressionFeatureModel()
     let screenRecording = ScreenRecordingFeatureModel()
     let clipboardHistory: ClipboardHistoryFeatureModel
@@ -349,6 +350,11 @@ final class AppModel: ObservableObject {
     func presentTextTranslation() {
         textTranslationLaunchRequest = nil
         selectedDestination = .translation
+        presentMainWindow()
+    }
+
+    func presentDeveloperTools() {
+        selectedDestination = .developerTools
         presentMainWindow()
     }
 
@@ -847,7 +853,7 @@ final class AppModel: ObservableObject {
             // terminal capture path replaces the toast with its own result.
             break
         }
-        Task {
+        Task { [self] in
             defer { setCaptureActivity(false) }
             do {
                 let url = try await screenshotService.capture(

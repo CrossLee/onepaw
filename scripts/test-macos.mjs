@@ -57,17 +57,19 @@ export function verifyGroupResult(group, result) {
   const output = stripAnsi(result.output);
   const swiftSummaries = [...output.matchAll(/Test run with (\d+) tests?(?: in \d+ suites?)? passed after [\d.]+ seconds\./g)];
   const xctestSummaries = [...output.matchAll(/Test Suite 'Selected tests' passed at[^\n]*\n\s*Executed (\d+) tests?, with 0 failures? \(0 unexpected\)/g)];
-  // Swift Testing emits one final summary even when the filter selects XCTest
-  // only. Missing/duplicated summaries are never accepted as a successful run.
-  if (swiftSummaries.length !== 1 || xctestSummaries.length > 1) {
+  // Swift Testing emits exactly one final summary. Depending on which bundle
+  // the filter selects, SwiftPM can emit no XCTest summary or one summary per
+  // linked test bundle (including zero-test summaries). Verify their combined
+  // count instead of relying on one fixed output shape.
+  if (swiftSummaries.length !== 1) {
     throw new Error(`${group.name}: missing or duplicate final test summary (possible early exit).`);
-  }
-  if (group.xctest > 0 && xctestSummaries.length !== 1) {
-    throw new Error(`${group.name}: missing final XCTest summary.`);
   }
   const actual = {
     swiftTesting: Number(swiftSummaries[0][1]),
-    xctest: xctestSummaries.length ? Number(xctestSummaries[0][1]) : 0,
+    xctest: xctestSummaries.reduce(
+      (sum, summary) => sum + Number(summary[1]),
+      0,
+    ),
   };
   if (actual.swiftTesting !== group.swiftTesting || actual.xctest !== group.xctest) {
     throw new Error(`${group.name}: expected XCTest ${group.xctest} + Swift Testing ${group.swiftTesting}, got ${actual.xctest} + ${actual.swiftTesting}.`);

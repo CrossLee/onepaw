@@ -40,9 +40,21 @@ test('counts XCTest once and requires the independent Swift Testing summary', ()
   )), { xctest: 1, swiftTesting: 2 });
 });
 
+test('sums XCTest summaries from selected and empty linked test bundles', () => {
+  const group = discoverGroups(listing)[0];
+  assert.deepEqual(verifyGroupResult(group, result(
+    xctestSummary(1) + xctestSummary(0) + summary(2),
+  )), { xctest: 1, swiftTesting: 2 });
+});
+
 test('accepts Swift Testing-only group with the XCTest zero summary', () => {
   const group = discoverGroups(listing).find(group => group.name === 'WindowTests');
   assert.deepEqual(verifyGroupResult(group, result(xctestSummary(0) + summary(2))), { xctest: 0, swiftTesting: 2 });
+});
+
+test('accepts Swift Testing-only group when SwiftPM omits XCTest output', () => {
+  const group = discoverGroups(listing).find(group => group.name === 'WindowTests');
+  assert.deepEqual(verifyGroupResult(group, result(summary(2))), { xctest: 0, swiftTesting: 2 });
 });
 
 for (const [name, output] of [

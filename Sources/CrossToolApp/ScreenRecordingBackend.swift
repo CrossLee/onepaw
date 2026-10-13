@@ -121,6 +121,21 @@ enum ScreenRecordingBackendError: LocalizedError {
     }
 }
 
+/// Waits for an independently retained task while forwarding cancellation.
+/// Keeping the cancellation handler outside the service method's scope lets
+/// Swift 6 verify the task parameter independently from the actor-owned stored
+/// reference while preserving immediate cancellation.
+@MainActor
+private func valueOfCancellableTask<Success: Sendable>(
+    _ task: Task<Success, any Error>
+) async throws -> Success {
+    try await withTaskCancellationHandler {
+        try await task.value
+    } onCancel: {
+        task.cancel()
+    }
+}
+
 /// Owns one ScreenCaptureKit stream and its MOV writer.
 ///
 /// Call `start(target:destinationURL:options:)`, then retain this service until
@@ -174,11 +189,7 @@ final class ScreenRecordingService {
                 )
             }
             pendingSelectionTask = selectionTask
-            let filter = try await withTaskCancellationHandler {
-                try await selectionTask.value
-            } onCancel: {
-                selectionTask.cancel()
-            }
+            let filter = try await valueOfCancellableTask(selectionTask)
             pendingSelectionTask = nil
 
             guard pendingStartID == startID else {
@@ -315,11 +326,7 @@ final class ScreenRecordingService {
                 )
             }
             pendingRegionSelectionTask = selectionTask
-            let selection = try await withTaskCancellationHandler {
-                try await selectionTask.value
-            } onCancel: {
-                selectionTask.cancel()
-            }
+            let selection = try await valueOfCancellableTask(selectionTask)
             pendingRegionSelectionTask = nil
 
             guard pendingStartID == startID else {
