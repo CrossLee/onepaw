@@ -33,6 +33,12 @@ struct GlobalShortcutSettingsSection: View {
     private let translationCommands: [GlobalShortcutCommand] = [
         .translateText,
     ]
+    private let developerToolCommands: [GlobalShortcutCommand] = [
+        .formatClipboardJSON,
+    ]
+    private let applicationCommands: [GlobalShortcutCommand] = [
+        .showMainWindow,
+    ]
 
     var body: some View {
         Group {
@@ -40,6 +46,8 @@ struct GlobalShortcutSettingsSection: View {
             shortcutSection(title: "录屏", commands: recordingCommands)
             shortcutSection(title: "提取颜色", commands: colorCommands)
             shortcutSection(title: "翻译", commands: translationCommands)
+            shortcutSection(title: "开发工具", commands: developerToolCommands)
+            shortcutSection(title: "应用", commands: applicationCommands)
 
             Section("全局快捷键设置") {
                 settingsStatus
@@ -81,6 +89,15 @@ struct GlobalShortcutSettingsSection: View {
                 Label(
                     "快捷翻译优先通过辅助功能读取选中文字；少数 App 不提供选中文字时，会短暂执行复制并尽力恢复原剪贴板。密码框和安全输入不会读取。",
                     systemImage: "accessibility"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if commands.contains(.formatClipboardJSON) {
+                Label(
+                    "先复制 JSON 文字，再按快捷键；一爪会读取当前剪贴板，打开开发工具并自动格式化。此操作不会改写剪贴板，也不需要辅助功能权限。",
+                    systemImage: "doc.on.clipboard"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -145,7 +162,7 @@ struct GlobalShortcutSettingsSection: View {
 
     private var settingsStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("点击右侧按键框后，按住 Ctrl 不松开，再按一个主键，例如 Ctrl+A。也支持 Ctrl+Shift+A、Ctrl+Option+A 等组合；按 Esc 可取消。为避免抢占其他 App 的保存、关闭等操作，不允许仅使用 Command 加主键。区域、窗口和全屏截图必须保留快捷键；录屏、取色、翻译等其他功能可在录制时按 Delete 清除。")
+            Text("点击右侧按键框后，按住 Ctrl 不松开，再按一个主键，例如 Ctrl+A。也支持 Ctrl+Shift+A、Ctrl+Option+A 等组合；按 Esc 可取消。为避免抢占其他 App 的保存、关闭等操作，不允许仅使用 Command 加主键。区域、窗口和全屏截图必须保留快捷键；其余功能可在录制时按 Delete 清除。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 

@@ -340,6 +340,10 @@ final class AppModel: ObservableObject {
             sampleAndCopyColor()
         case .translateText:
             translateSelectedTextFromShortcut()
+        case .formatClipboardJSON:
+            presentClipboardJSONFormatter()
+        case .showMainWindow:
+            presentMainWindow()
         case .screenshotRegion, .screenshotWindow, .screenshotScreen,
              .screenshotDelayed, .screenshotFramed, .screenshotMultiWindow,
              .screenshotScrolling:
@@ -355,6 +359,12 @@ final class AppModel: ObservableObject {
 
     func presentDeveloperTools() {
         selectedDestination = .developerTools
+        presentMainWindow()
+    }
+
+    func presentClipboardJSONFormatter() {
+        selectedDestination = .developerTools
+        developerTools.formatJSONFromPasteboard()
         presentMainWindow()
     }
 

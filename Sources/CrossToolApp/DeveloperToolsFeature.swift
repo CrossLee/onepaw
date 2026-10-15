@@ -106,6 +106,25 @@ final class DeveloperToolsFeatureModel: ObservableObject {
         updateJSONInput(text)
     }
 
+    /// Reads the clipboard exactly once, switches to the JSON tool, and starts
+    /// formatting without requiring a second button click. An empty or
+    /// non-text clipboard clears stale input/output and cancels in-flight work
+    /// so a shortcut can never reformat an earlier clipboard value.
+    func formatJSONFromPasteboard() {
+        selectedTool = .jsonFormatter
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else {
+            clearJSON()
+            feedback = DeveloperToolsFeedback(
+                kind: .information,
+                message: "剪贴板里没有可用的文字。"
+            )
+            return
+        }
+
+        updateJSONInput(text)
+        formatJSON()
+    }
+
     func clearJSON() {
         jsonInput = ""
         jsonOutput = ""

@@ -57,7 +57,8 @@ extension GlobalShortcutCommand {
         case .recordWindow: return .window
         case .screenshotRegion, .screenshotWindow, .screenshotScreen,
              .screenshotDelayed, .screenshotFramed, .screenshotMultiWindow,
-             .screenshotScrolling, .pickColor, .translateText:
+             .screenshotScrolling, .pickColor, .translateText,
+             .formatClipboardJSON, .showMainWindow:
             return nil
         }
     }

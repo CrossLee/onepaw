@@ -16,6 +16,8 @@ import Testing
         .recordWindow: ("recording.window", 103),
         .pickColor: ("color.pick", 201),
         .translateText: ("translation.text", 301),
+        .formatClipboardJSON: ("developer.jsonFormatClipboard", 401),
+        .showMainWindow: ("application.showMainWindow", 501),
     ]
 
     #expect(expected.count == GlobalShortcutCommand.allCases.count)
@@ -39,15 +41,18 @@ import Testing
 @Test func globalShortcutCommandsBridgeToStringKeyedPersistedBindings() {
     let region = GlobalShortcut(keyCode: 18, modifiers: [.control, .shift])
     let recording = GlobalShortcut(keyCode: 15, modifiers: [.command])
+    let jsonFormatting = GlobalShortcut(keyCode: 40, modifiers: [.control, .option])
     let shortcuts: [GlobalShortcutCommand: GlobalShortcut] = [
         .screenshotRegion: region,
         .recordRegion: recording,
+        .formatClipboardJSON: jsonFormatting,
     ]
 
     let bindings = GlobalShortcutCommand.persistedBindings(from: shortcuts)
     #expect(bindings == [
         "screenshot.region": region,
         "recording.region": recording,
+        "developer.jsonFormatClipboard": jsonFormatting,
     ])
 
     var withFutureCommand = bindings

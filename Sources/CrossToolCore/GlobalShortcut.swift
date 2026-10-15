@@ -17,6 +17,8 @@ public enum GlobalShortcutCommand: String, CaseIterable, Identifiable, Hashable,
     case recordWindow = "recording.window"
     case pickColor = "color.pick"
     case translateText = "translation.text"
+    case formatClipboardJSON = "developer.jsonFormatClipboard"
+    case showMainWindow = "application.showMainWindow"
 
     public var id: String { rawValue }
 
@@ -36,6 +38,8 @@ public enum GlobalShortcutCommand: String, CaseIterable, Identifiable, Hashable,
         case .recordWindow: return 103
         case .pickColor: return 201
         case .translateText: return 301
+        case .formatClipboardJSON: return 401
+        case .showMainWindow: return 501
         }
     }
 

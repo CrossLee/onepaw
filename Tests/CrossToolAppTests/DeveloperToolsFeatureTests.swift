@@ -53,6 +53,63 @@ struct DeveloperToolsFeatureTests {
         #expect(model.jsonOutput.isEmpty)
     }
 
+    @Test("Clipboard JSON shortcut selects the tool and formats immediately")
+    func clipboardJSONShortcutFormatsImmediately() async throws {
+        let pasteboard = makePasteboard()
+        #expect(pasteboard.setString("{\"ready\":true,\"count\":2}", forType: .string))
+        let originalChangeCount = pasteboard.changeCount
+        let model = DeveloperToolsFeatureModel(pasteboard: pasteboard)
+        model.selectedTool = .base64Encoder
+
+        model.formatJSONFromPasteboard()
+
+        #expect(model.selectedTool == .jsonFormatter)
+        #expect(model.jsonInput == "{\"ready\":true,\"count\":2}")
+        try await waitUntil { !model.isFormattingJSON }
+        #expect(model.jsonOutput == "{\n  \"ready\": true,\n  \"count\": 2\n}")
+        #expect(model.feedback?.kind == .success)
+        #expect(pasteboard.string(forType: .string) == "{\"ready\":true,\"count\":2}")
+        #expect(pasteboard.changeCount == originalChangeCount)
+    }
+
+    @Test("Clipboard JSON shortcut reports invalid JSON without another click")
+    func clipboardJSONShortcutReportsInvalidJSON() async throws {
+        let pasteboard = makePasteboard()
+        #expect(pasteboard.setString("{\"broken\":}", forType: .string))
+        let model = DeveloperToolsFeatureModel(pasteboard: pasteboard)
+
+        model.formatJSONFromPasteboard()
+
+        try await waitUntil { !model.isFormattingJSON }
+        #expect(model.jsonInput == "{\"broken\":}")
+        #expect(model.jsonOutput.isEmpty)
+        #expect(model.feedback?.kind == .error)
+    }
+
+    @Test("Empty clipboard shortcut clears stale JSON instead of formatting it")
+    func emptyClipboardShortcutClearsStaleJSON() async throws {
+        let pasteboard = makePasteboard()
+        let model = DeveloperToolsFeatureModel(pasteboard: pasteboard)
+        model.updateJSONInput(
+            "[" + Array(repeating: "{\"value\":1}", count: 10_000)
+                .joined(separator: ",") + "]"
+        )
+        model.formatJSON()
+        pasteboard.clearContents()
+
+        model.formatJSONFromPasteboard()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(model.selectedTool == .jsonFormatter)
+        #expect(model.jsonInput.isEmpty)
+        #expect(model.jsonOutput.isEmpty)
+        #expect(!model.isFormattingJSON)
+        #expect(model.feedback == DeveloperToolsFeedback(
+            kind: .information,
+            message: "剪贴板里没有可用的文字。"
+        ))
+    }
+
     @Test("Leaving JSON cancels its pending result and feedback")
     func switchingToolsCancelsJSONFormatting() async throws {
         let model = DeveloperToolsFeatureModel(pasteboard: makePasteboard())

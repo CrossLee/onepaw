@@ -97,7 +97,7 @@ extension GlobalShortcutCommand {
         case .screenshotMultiWindow: return .multiWindow
         case .screenshotScrolling: return .scrolling
         case .recordCurrentDisplay, .recordRegion, .recordWindow, .pickColor,
-             .translateText:
+             .translateText, .formatClipboardJSON, .showMainWindow:
             return nil
         }
     }
@@ -110,6 +110,8 @@ extension GlobalShortcutCommand {
         case .recordWindow: return "录制窗口"
         case .pickColor: return "提取颜色"
         case .translateText: return "选中文字并翻译"
+        case .formatClipboardJSON: return "格式化剪贴板 JSON"
+        case .showMainWindow: return "显示一爪主界面"
         case .screenshotRegion, .screenshotWindow, .screenshotScreen,
              .screenshotDelayed, .screenshotFramed, .screenshotMultiWindow,
              .screenshotScrolling:
@@ -125,6 +127,8 @@ extension GlobalShortcutCommand {
         case .recordWindow: return "macwindow"
         case .pickColor: return "eyedropper"
         case .translateText: return "bubble.left.and.bubble.right"
+        case .formatClipboardJSON: return "curlybraces.square"
+        case .showMainWindow: return "macwindow"
         case .screenshotRegion, .screenshotWindow, .screenshotScreen,
              .screenshotDelayed, .screenshotFramed, .screenshotMultiWindow,
              .screenshotScrolling:
