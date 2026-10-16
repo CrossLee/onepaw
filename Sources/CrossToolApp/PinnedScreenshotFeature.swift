@@ -429,6 +429,17 @@ final class PinnedScreenshotPanel: NSPanel {
     var onScrollZoom: (@MainActor (NSEvent) -> Void)?
     var onBareEscapeClose: (@MainActor () -> Void)?
 
+    private(set) var isClosedForVisibilityRecovery = false
+    private(set) var temporaryVisibilitySuppressionDepth = 0
+
+    var isTemporarilyVisibilitySuppressed: Bool {
+        temporaryVisibilitySuppressionDepth > 0
+    }
+
+    var allowsVisibilityRecovery: Bool {
+        !isClosedForVisibilityRecovery
+    }
+
     init(
         contentRect: CGRect,
         sourcePixelSize: CGSize,
@@ -475,6 +486,36 @@ final class PinnedScreenshotPanel: NSPanel {
         )
         contentMaxSize = maximumContentSize
         setAccessibilityLabel("固定的截图")
+    }
+
+    override func close() {
+        // Closing a pin is the user's permanent decision for this process.
+        // Delayed wake/Space recovery and an outstanding capture scope must
+        // never order this window onscreen again.
+        isClosedForVisibilityRecovery = true
+        super.close()
+    }
+
+    func beginTemporaryVisibilitySuppression() {
+        guard allowsVisibilityRecovery else { return }
+        temporaryVisibilitySuppressionDepth += 1
+        orderOut(nil)
+    }
+
+    func endTemporaryVisibilitySuppression() {
+        guard temporaryVisibilitySuppressionDepth > 0 else { return }
+        temporaryVisibilitySuppressionDepth -= 1
+        guard temporaryVisibilitySuppressionDepth == 0 else { return }
+        recoverVisibilityAfterSystemTransition()
+    }
+
+    func recoverVisibilityAfterSystemTransition() {
+        guard allowsVisibilityRecovery,
+              !isTemporarilyVisibilitySuppressed else {
+            return
+        }
+        level = .floating
+        orderFrontRegardless()
     }
 
     override func sendEvent(_ event: NSEvent) {
@@ -675,12 +716,25 @@ final class PinnedScreenshotWindowController: NSWindowController, NSWindowDelega
     }
 
     func show(selectForKeyboard: Bool = false) {
-        guard let window else { return }
+        guard let panel = window as? PinnedScreenshotPanel else { return }
         // Ordering alone must not steal keyboard focus from another app.
-        window.orderFrontRegardless()
+        panel.recoverVisibilityAfterSystemTransition()
         if selectForKeyboard {
-            window.makeKey()
+            panel.makeKey()
         }
+    }
+
+    func recoverVisibilityAfterSystemTransition() {
+        (window as? PinnedScreenshotPanel)?
+            .recoverVisibilityAfterSystemTransition()
+    }
+
+    func recoverVisibilityIfUnexpectedlyHidden() {
+        guard let panel = window as? PinnedScreenshotPanel,
+              !panel.isVisible else {
+            return
+        }
+        panel.recoverVisibilityAfterSystemTransition()
     }
 
     override func close() {
@@ -757,9 +811,15 @@ final class PinnedScreenshotWindowController: NSWindowController, NSWindowDelega
 final class PinnedScreenshotManager: NSObject {
     nonisolated static let defaultMemoryBudgetBytes = 128 * 1_024 * 1_024
 
+    private static let delayedRecoveryNanoseconds: UInt64 = 300_000_000
+    private static let visibilityWatchdogNanoseconds: UInt64 = 5_000_000_000
+
     private let memoryBudgetBytes: Int
     private let maximumSnapshotPixelCount: Int
+    private let workspaceNotificationCenter: NotificationCenter
     private var controllers: [UUID: PinnedScreenshotWindowController] = [:]
+    private var delayedRecoveryTask: Task<Void, Never>?
+    private var visibilityWatchdogTask: Task<Void, Never>?
 
     private(set) var count = 0
     private(set) var totalByteCost = 0
@@ -770,6 +830,7 @@ final class PinnedScreenshotManager: NSObject {
     ) {
         self.memoryBudgetBytes = max(1, memoryBudgetBytes)
         self.maximumSnapshotPixelCount = max(1, maximumSnapshotPixelCount)
+        workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
         super.init()
         NotificationCenter.default.addObserver(
             self,
@@ -777,10 +838,27 @@ final class PinnedScreenshotManager: NSObject {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        for name in [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification,
+            NSWorkspace.activeSpaceDidChangeNotification,
+        ] {
+            workspaceNotificationCenter.addObserver(
+                self,
+                selector: #selector(workspaceVisibilityMayHaveChanged(_:)),
+                name: name,
+                object: nil
+            )
+        }
+        startVisibilityWatchdog()
     }
 
     deinit {
+        delayedRecoveryTask?.cancel()
+        visibilityWatchdogTask?.cancel()
         NotificationCenter.default.removeObserver(self)
+        workspaceNotificationCenter.removeObserver(self)
     }
 
     @discardableResult
@@ -853,9 +931,20 @@ final class PinnedScreenshotManager: NSObject {
         controllers[id]?.window?.frame
     }
 
-    @objc
+    @objc nonisolated
     private func screenParametersDidChange(_ notification: Notification) {
-        clampAllToAvailableScreens()
+        Task { @MainActor [weak self] in
+            self?.recoverAfterSystemTransition()
+        }
+    }
+
+    @objc nonisolated
+    private func workspaceVisibilityMayHaveChanged(_ notification: Notification) {
+        // NSWorkspace notifications are not contractually tied to the main
+        // queue. Marshal every AppKit window mutation onto MainActor.
+        Task { @MainActor [weak self] in
+            self?.recoverAfterSystemTransition()
+        }
     }
 
     private func removeController(id: UUID) {
@@ -874,6 +963,67 @@ final class PinnedScreenshotManager: NSObject {
                 continue
             }
             controller.clamp(to: screen.visibleFrame)
+        }
+    }
+
+    private func recoverAfterSystemTransition() {
+        recoverAllVisiblePins()
+
+        // Wake and display notifications can arrive before WindowServer has
+        // finished rebuilding Spaces and screen geometry. Coalesce a short
+        // second pass so the final topology also receives the recovery.
+        delayedRecoveryTask?.cancel()
+        delayedRecoveryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(
+                    nanoseconds: Self.delayedRecoveryNanoseconds
+                )
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.recoverAllVisiblePins()
+        }
+    }
+
+    private func recoverAllVisiblePins() {
+        guard !NSScreen.screens.isEmpty else { return }
+        clampAllToAvailableScreens()
+        for controller in controllers.values {
+            controller.recoverVisibilityAfterSystemTransition()
+        }
+    }
+
+    private func startVisibilityWatchdog() {
+        visibilityWatchdogTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(
+                        nanoseconds: Self.visibilityWatchdogNanoseconds
+                    )
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                self?.recoverUnexpectedlyHiddenPins()
+            }
+        }
+    }
+
+    private func recoverUnexpectedlyHiddenPins() {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+
+        for controller in controllers.values {
+            guard let panel = controller.window as? PinnedScreenshotPanel,
+                  panel.allowsVisibilityRecovery,
+                  !panel.isTemporarilyVisibilitySuppressed,
+                  !panel.isVisible,
+                  let screen = bestScreen(for: panel.frame, among: screens) else {
+                continue
+            }
+            controller.clamp(to: screen.visibleFrame)
+            controller.recoverVisibilityIfUnexpectedlyHidden()
         }
     }
 

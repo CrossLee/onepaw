@@ -678,6 +678,8 @@ struct PinnedScreenshotFeatureTests {
         #expect(window.contentAspectRatio == snapshot.sourcePixelSize)
         #expect(abs(window.frame.width / window.frame.height - 2) < 0.000_1)
         #expect(window.contentMaxSize == maximumContentSize)
+        #expect(panel.allowsVisibilityRecovery)
+        #expect(!panel.isTemporarilyVisibilitySuppressed)
 
         let contentView = try #require(window.contentView)
         let imageView = try #require(
@@ -708,6 +710,48 @@ struct PinnedScreenshotFeatureTests {
 
         #expect(closeCount == 1)
         #expect(!window.isVisible)
+        #expect(!panel.allowsVisibilityRecovery)
+    }
+
+    @Test("Workspace wake restores a retained pin without activating it")
+    func workspaceWakeRestoresRetainedPinWithoutActivation() async throws {
+        let app = NSApplication.shared
+        let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
+        let manager = PinnedScreenshotManager()
+        let preexistingPanels = Set(
+            app.windows
+                .compactMap { $0 as? PinnedScreenshotPanel }
+                .map(ObjectIdentifier.init)
+        )
+        defer { manager.closeAll() }
+
+        let id = try manager.pin(
+            image: makeImage(width: 320, height: 180),
+            anchor: CGPoint(x: screen.visibleFrame.midX, y: screen.visibleFrame.midY),
+            targetScreen: screen,
+            selectForKeyboard: false
+        )
+        let panel = try #require(
+            app.windows.compactMap { $0 as? PinnedScreenshotPanel }.first {
+                !preexistingPanels.contains(ObjectIdentifier($0))
+            }
+        )
+        #expect(manager.contains(id: id))
+        #expect(panel.isVisible)
+
+        panel.orderOut(nil)
+        #expect(!panel.isVisible)
+
+        NSWorkspace.shared.notificationCenter.post(
+            name: NSWorkspace.didWakeNotification,
+            object: NSWorkspace.shared
+        )
+        await Task.yield()
+
+        #expect(panel.isVisible)
+        #expect(!panel.isKeyWindow)
+        #expect(panel.level == .floating)
+        #expect(manager.contains(id: id))
     }
 
     @Test("Temporarily hidden windows restore pins in a separate idempotent batch")
@@ -764,12 +808,22 @@ struct PinnedScreenshotFeatureTests {
         #expect(!mainWindow.isVisible)
         #expect(!firstPin.isVisible)
         #expect(!secondPin.isVisible)
+        #expect(firstPin.temporaryVisibilitySuppressionDepth == 1)
+        #expect(secondPin.temporaryVisibilitySuppressionDepth == 1)
+
+        // A wake/Space recovery pass must not expose pins inside a capture.
+        firstPin.recoverVisibilityAfterSystemTransition()
+        secondPin.recoverVisibilityAfterSystemTransition()
+        #expect(!firstPin.isVisible)
+        #expect(!secondPin.isVisible)
 
         hiddenWindows.restorePinnedScreenshotWindows()
 
         #expect(!mainWindow.isVisible)
         #expect(firstPin.isVisible)
         #expect(secondPin.isVisible)
+        #expect(firstPin.temporaryVisibilitySuppressionDepth == 0)
+        #expect(secondPin.temporaryVisibilitySuppressionDepth == 0)
 
         hiddenWindows.restorePinnedScreenshotWindows()
         #expect(!mainWindow.isVisible)
@@ -795,6 +849,107 @@ struct PinnedScreenshotFeatureTests {
         #expect(!mainWindow.isVisible)
         #expect(!firstPin.isVisible)
         #expect(secondPin.isVisible)
+    }
+
+    @Test("Nested temporary hiding restores pins only after the final scope ends")
+    func nestedTemporaryHidingRestoresAfterFinalScope() {
+        let app = NSApplication.shared
+        let preexistingVisibleWindows = app.windows.filter(\.isVisible)
+        for window in preexistingVisibleWindows {
+            window.orderOut(nil)
+        }
+
+        let pin = PinnedScreenshotPanel(
+            contentRect: CGRect(x: 280, y: 180, width: 240, height: 120),
+            sourcePixelSize: CGSize(width: 400, height: 200),
+            maximumContentSize: CGSize(width: 800, height: 600)
+        )
+        defer {
+            pin.close()
+            for window in preexistingVisibleWindows where !window.isVisible {
+                window.orderFront(nil)
+            }
+        }
+
+        pin.orderFrontRegardless()
+        let outerScope = TemporarilyHiddenAppWindows()
+        let innerScope = TemporarilyHiddenAppWindows()
+
+        #expect(pin.temporaryVisibilitySuppressionDepth == 2)
+        #expect(!pin.isVisible)
+
+        outerScope.restorePinnedScreenshotWindows()
+        #expect(pin.temporaryVisibilitySuppressionDepth == 1)
+        #expect(!pin.isVisible)
+
+        innerScope.restorePinnedScreenshotWindows()
+        #expect(pin.temporaryVisibilitySuppressionDepth == 0)
+        #expect(pin.isVisible)
+    }
+
+    @Test("Explicitly closed pin cannot be revived by capture cleanup or recovery")
+    func explicitCloseCannotBeRevived() {
+        let app = NSApplication.shared
+        let preexistingVisibleWindows = app.windows.filter(\.isVisible)
+        for window in preexistingVisibleWindows {
+            window.orderOut(nil)
+        }
+
+        let pin = PinnedScreenshotPanel(
+            contentRect: CGRect(x: 280, y: 180, width: 240, height: 120),
+            sourcePixelSize: CGSize(width: 400, height: 200),
+            maximumContentSize: CGSize(width: 800, height: 600)
+        )
+        defer {
+            for window in preexistingVisibleWindows where !window.isVisible {
+                window.orderFront(nil)
+            }
+        }
+
+        pin.orderFrontRegardless()
+        let hiddenWindows = TemporarilyHiddenAppWindows()
+        #expect(pin.temporaryVisibilitySuppressionDepth == 1)
+        #expect(!pin.isVisible)
+
+        pin.close()
+        hiddenWindows.restorePinnedScreenshotWindows()
+        pin.recoverVisibilityAfterSystemTransition()
+
+        #expect(!pin.allowsVisibilityRecovery)
+        #expect(pin.temporaryVisibilitySuppressionDepth == 0)
+        #expect(!pin.isVisible)
+    }
+
+    @Test("Abandoned temporary hiding scope restores its visibility lease")
+    func abandonedTemporaryHidingScopeRestoresPin() {
+        let app = NSApplication.shared
+        let preexistingVisibleWindows = app.windows.filter(\.isVisible)
+        for window in preexistingVisibleWindows {
+            window.orderOut(nil)
+        }
+
+        let pin = PinnedScreenshotPanel(
+            contentRect: CGRect(x: 280, y: 180, width: 240, height: 120),
+            sourcePixelSize: CGSize(width: 400, height: 200),
+            maximumContentSize: CGSize(width: 800, height: 600)
+        )
+        defer {
+            pin.close()
+            for window in preexistingVisibleWindows where !window.isVisible {
+                window.orderFront(nil)
+            }
+        }
+
+        pin.orderFrontRegardless()
+        var hiddenWindows: TemporarilyHiddenAppWindows? = TemporarilyHiddenAppWindows()
+        #expect(hiddenWindows != nil)
+        #expect(pin.temporaryVisibilitySuppressionDepth == 1)
+        #expect(!pin.isVisible)
+
+        hiddenWindows = nil
+
+        #expect(pin.temporaryVisibilitySuppressionDepth == 0)
+        #expect(pin.isVisible)
     }
 
     @Test("Manager retains multiple panels independently and releases budget on close")

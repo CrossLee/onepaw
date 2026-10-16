@@ -355,26 +355,47 @@ final class ScreenshotService: @unchecked Sendable {
 @MainActor
 final class TemporarilyHiddenAppWindows {
     private var windowsToRestore: [NSWindow]
+    private var pinnedWindowsToRestore: [PinnedScreenshotPanel]
 
     init() {
-        let visibleWindows = NSApp.windows.filter(\.isVisible)
+        let appWindows = NSApp.windows
+        let visibleWindows = appWindows.filter(\.isVisible)
         windowsToRestore = visibleWindows.filter { window in
             (window.canBecomeMain && window.styleMask.contains(.titled))
-                || window is PinnedScreenshotPanel
         }
-        for window in visibleWindows {
+        pinnedWindowsToRestore = appWindows.compactMap { window in
+            guard let panel = window as? PinnedScreenshotPanel,
+                  panel.allowsVisibilityRecovery else {
+                return nil
+            }
+            return panel
+        }
+
+        for window in visibleWindows where !(window is PinnedScreenshotPanel) {
             window.orderOut(nil)
         }
+        // Include already-suppressed pins so nested capture scopes cannot let
+        // an outer scope restore a pin while an inner capture is still active.
+        for panel in pinnedWindowsToRestore {
+            panel.beginTemporaryVisibilitySuppression()
+        }
+    }
+
+    isolated deinit {
+        // Every current caller restores explicitly, but keep the visibility
+        // lease fail-safe: cancellation or a future early-return path must not
+        // strand a pin in its temporarily suppressed state.
+        restore()
     }
 
     /// Restores only detached screenshot pins while keeping the main OnePaw
     /// window hidden. Region recording uses this after selection so the user
     /// can keep referencing pins without exposing them to the capture filter.
     func restorePinnedScreenshotWindows() {
-        let pinnedWindows = windowsToRestore.filter { $0 is PinnedScreenshotPanel }
-        windowsToRestore.removeAll { $0 is PinnedScreenshotPanel }
-        for window in pinnedWindows {
-            window.orderFront(nil)
+        let pinnedWindows = pinnedWindowsToRestore
+        pinnedWindowsToRestore.removeAll()
+        for panel in pinnedWindows {
+            panel.endTemporaryVisibilitySuppression()
         }
     }
 
@@ -384,5 +405,6 @@ final class TemporarilyHiddenAppWindows {
         for window in windows {
             window.orderFront(nil)
         }
+        restorePinnedScreenshotWindows()
     }
 }
