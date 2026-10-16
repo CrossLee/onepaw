@@ -19,10 +19,10 @@
 
 | 平台 | 最新已发布版本 | 安装包 | 发布状态 |
 | :--- | :--- | :--- | :--- |
-| macOS 14+ · Apple Silicon / Intel | [0.6.14](https://github.com/CrossLee/onepaw/releases/tag/v0.6.14) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.14/OnePaw-0.6.14-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
+| macOS 14+ · Apple Silicon / Intel | [0.6.15](https://github.com/CrossLee/onepaw/releases/tag/v0.6.15) | **[下载 DMG](https://github.com/CrossLee/onepaw/releases/download/v0.6.15/OnePaw-0.6.15-macos-universal2.dmg)** | Developer ID 签名 · Apple 公证 |
 | Windows 11 · x64 / ARM64 | [0.1.29.0](https://github.com/CrossLee/onepaw/releases/tag/windows-v0.1.29.0-preview) | **[下载 EXE](https://github.com/CrossLee/onepaw/releases/download/windows-v0.1.29.0-preview/OnePaw-Windows-0.1.29.0-Setup.exe)** | 预览版 · 尚未签名 |
 
-Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.14/OnePaw-0.6.14-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.14/OnePaw-0.6.14-macos-universal2.zip)。版本信息更新于 **2026-10-15**。
+Mac 备用安装方式：[PKG](https://github.com/CrossLee/onepaw/releases/download/v0.6.15/OnePaw-0.6.15-macos-universal2.pkg) · [ZIP](https://github.com/CrossLee/onepaw/releases/download/v0.6.15/OnePaw-0.6.15-macos-universal2.zip)。版本信息更新于 **2026-10-16**。
 
 Windows 安装器可直接双击，自动选择架构，不需要操作 PowerShell。当前仍是未签名预览版，可能出现“未知发布者”提示，部分设备策略会阻止安装；不要关闭安全保护来绕过限制。[签名进度与说明](docs/windows-signing.md)
 
@@ -44,7 +44,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 
 - **截图、标注、识字** — 画笔、箭头、矩形、马赛克、文字和自动递增序号；Mac 使用本机 Vision 自动 OCR。在截图编辑器中按 `S` 把当前截图变成置顶小贴图，滚轮缩放，`Esc` 关闭。
 - **图片压缩** — 本地批量处理，兼顾清晰度与体积，不覆盖原图。Mac 的 Finder“打开方式 → 一爪”可自动压缩 PNG、JPEG/JFIF、HEIC、TIFF，保持原格式和后缀，完成后定位结果。
-- **屏幕录制** — 录屏幕、窗口或指定区域，按需保留系统声音和鼠标指针。Mac 当前不采集麦克风，成片默认只保存在本机。
+- **屏幕录制** — 录屏幕、窗口或指定区域，按需保留系统声音和鼠标指针。录制时菜单栏显示闪烁状态，并提供置顶停止按钮和可配置的停止快捷键；成片保存后自动打开所在目录。Mac 当前不采集麦克风，成片默认只保存在本机。
 - **屏幕取色** — 提取标准 sRGB 颜色，复制 HEX、RGB 或 HSL，保存最近使用的颜色。
 - **本机翻译** — 双栏翻译，也可为选中文字设置快捷中英互译。Mac 需要 macOS 15+；两平台首次准备语言模型可能需要联网。
 - **开发工具** — 在本机完成严格 JSON 格式化、UTF-8 Base64 编码和批量 UUID 生成；内容不会上传，也不会自动加入共享区。可为“格式化剪贴板 JSON”设置全局快捷键，复制 JSON 后一键打开并自动格式化。
@@ -74,7 +74,7 @@ GitHub 的 “Source code” 是源码，不是安装包。
 
 Universal 2 同时支持 Apple Silicon 与 Intel，无需 Rosetta。macOS 14 可用除本机翻译以外的其他功能；本机翻译需要 macOS 15+。
 
-**从旧名称升级到一爪，请下载 0.6.14 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
+**从旧名称升级到一爪，请下载 0.6.15 的 PKG。** PKG 会先校验和备份原应用，再归档旧名称实体；请勿提前删除旧应用或用户数据。DMG/ZIP 不自动迁移旧名称，直接拖入可能留下两个应用目录。
 
 安装并打开一次后，系统才会注册 Finder 服务；若“复制路径”未显示，可检查系统键盘快捷键中的“服务”。
 

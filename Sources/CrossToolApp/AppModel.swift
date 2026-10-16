@@ -11,6 +11,26 @@ enum CaptureActivityInvalidationPolicy {
     }
 }
 
+enum RecordingStopShortcutDecision: Equatable {
+    case stopAndSave
+    case cancelPendingStart
+    case waitForSave
+    case noActiveRecording
+
+    init(state: ScreenRecordingFeatureState) {
+        switch state {
+        case .recording:
+            self = .stopAndSave
+        case .choosingSource, .starting:
+            self = .cancelPendingStart
+        case .stopping:
+            self = .waitForSave
+        case .idle, .completed, .cancelled, .failed:
+            self = .noActiveRecording
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     private static let logger = Logger(
@@ -336,6 +356,8 @@ final class AppModel: ObservableObject {
             toggleRecordingFromShortcut(.region)
         case .recordWindow:
             toggleRecordingFromShortcut(.window)
+        case .stopRecording:
+            stopRecordingFromShortcut()
         case .pickColor:
             sampleAndCopyColor()
         case .translateText:
@@ -492,12 +514,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func stopRecordingFromShortcut() {
+        switch RecordingStopShortcutDecision(state: screenRecording.state) {
+        case .stopAndSave:
+            stopRecording()
+            notice = "正在停止并保存录屏…"
+        case .cancelPendingStart:
+            cancelRecording()
+            notice = "正在取消录屏…"
+        case .waitForSave:
+            notice = "正在保存录屏，请稍候"
+        case .noActiveRecording:
+            notice = "当前没有正在录制的内容"
+        }
+    }
+
     private func recordingShortcutConflictMessage(requested: ScreenRecordingSource) -> String {
         guard let activeSource = screenRecording.activeSource else {
             return "已有录屏任务正在进行，请先完成或取消"
         }
         var message = "无法开始“\(requested.title)”：正在进行“\(activeSource.title)”。请先停止或取消"
-        if let activeShortcut = configuredShortcutLabel(for: activeSource.shortcutCommand) {
+        if let stopShortcut = configuredShortcutLabel(for: .stopRecording) {
+            message += "；可按 \(stopShortcut) 停止"
+        } else if let activeShortcut = configuredShortcutLabel(for: activeSource.shortcutCommand) {
             message += "；也可再次按 \(activeShortcut)"
         }
         return message

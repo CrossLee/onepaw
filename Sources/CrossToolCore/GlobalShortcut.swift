@@ -15,6 +15,7 @@ public enum GlobalShortcutCommand: String, CaseIterable, Identifiable, Hashable,
     case recordCurrentDisplay = "recording.currentDisplay"
     case recordRegion = "recording.region"
     case recordWindow = "recording.window"
+    case stopRecording = "recording.stop"
     case pickColor = "color.pick"
     case translateText = "translation.text"
     case formatClipboardJSON = "developer.jsonFormatClipboard"
@@ -36,6 +37,7 @@ public enum GlobalShortcutCommand: String, CaseIterable, Identifiable, Hashable,
         case .recordCurrentDisplay: return 101
         case .recordRegion: return 102
         case .recordWindow: return 103
+        case .stopRecording: return 104
         case .pickColor: return 201
         case .translateText: return 301
         case .formatClipboardJSON: return 401

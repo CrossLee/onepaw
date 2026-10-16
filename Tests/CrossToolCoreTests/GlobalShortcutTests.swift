@@ -14,6 +14,7 @@ import Testing
         .recordCurrentDisplay: ("recording.currentDisplay", 101),
         .recordRegion: ("recording.region", 102),
         .recordWindow: ("recording.window", 103),
+        .stopRecording: ("recording.stop", 104),
         .pickColor: ("color.pick", 201),
         .translateText: ("translation.text", 301),
         .formatClipboardJSON: ("developer.jsonFormatClipboard", 401),
@@ -41,10 +42,12 @@ import Testing
 @Test func globalShortcutCommandsBridgeToStringKeyedPersistedBindings() {
     let region = GlobalShortcut(keyCode: 18, modifiers: [.control, .shift])
     let recording = GlobalShortcut(keyCode: 15, modifiers: [.command])
+    let stopRecording = GlobalShortcut(keyCode: 1, modifiers: [.control, .option])
     let jsonFormatting = GlobalShortcut(keyCode: 40, modifiers: [.control, .option])
     let shortcuts: [GlobalShortcutCommand: GlobalShortcut] = [
         .screenshotRegion: region,
         .recordRegion: recording,
+        .stopRecording: stopRecording,
         .formatClipboardJSON: jsonFormatting,
     ]
 
@@ -52,6 +55,7 @@ import Testing
     #expect(bindings == [
         "screenshot.region": region,
         "recording.region": recording,
+        "recording.stop": stopRecording,
         "developer.jsonFormatClipboard": jsonFormatting,
     ])
 
@@ -64,6 +68,18 @@ import Testing
         GlobalShortcutCommand.shortcuts(fromPersistedBindings: withFutureCommand)
             == shortcuts
     )
+}
+
+@Test func olderPersistedShortcutPayloadLeavesStopRecordingUnbound() {
+    let region = GlobalShortcut(keyCode: 18, modifiers: [.control, .shift])
+    let olderBindings = ["screenshot.region": region]
+
+    let shortcuts = GlobalShortcutCommand.shortcuts(
+        fromPersistedBindings: olderBindings
+    )
+
+    #expect(shortcuts[.screenshotRegion] == region)
+    #expect(shortcuts[.stopRecording] == nil)
 }
 
 @Test func globalShortcutDefaultLabelsUseExplicitMacModifierOrder() {

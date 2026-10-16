@@ -25,7 +25,6 @@ struct CrossToolApp: App {
 
 enum MenuBarStatusBadge: Equatable {
     case sharing
-    case recording
 }
 
 enum MenuBarStatusState: Equatable {
@@ -44,7 +43,16 @@ enum MenuBarStatusState: Equatable {
     }
 
     var systemImageName: String {
-        "cat.fill"
+        systemImageName(recordingPulseIsFilled: true)
+    }
+
+    func systemImageName(recordingPulseIsFilled: Bool) -> String {
+        switch self {
+        case .idle, .sharing:
+            "cat.fill"
+        case .recording:
+            recordingPulseIsFilled ? "record.circle.fill" : "record.circle"
+        }
     }
 
     var badge: MenuBarStatusBadge? {
@@ -54,7 +62,7 @@ enum MenuBarStatusState: Equatable {
         case .sharing:
             .sharing
         case .recording:
-            .recording
+            nil
         }
     }
 
@@ -74,6 +82,7 @@ private struct MenuBarStatusLabel: View {
     @ObservedObject var model: AppModel
     @ObservedObject var recording: ScreenRecordingFeatureModel
     let mainWindowPresenter: MainWindowPresenter
+    @State private var recordingPulseIsFilled = true
 
     private var state: MenuBarStatusState {
         MenuBarStatusState(
@@ -83,9 +92,26 @@ private struct MenuBarStatusLabel: View {
     }
 
     var body: some View {
-        MenuBarStatusGlyph(state: state)
+        MenuBarStatusGlyph(
+            state: state,
+            recordingPulseIsFilled: recordingPulseIsFilled
+        )
             .accessibilityLabel(state.accessibilityLabel)
             .help(state.accessibilityLabel)
+            .task(id: state) {
+                recordingPulseIsFilled = true
+                guard state == .recording else { return }
+
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(for: .milliseconds(600))
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
+                    recordingPulseIsFilled.toggle()
+                }
+            }
             .onAppear {
                 openMainWindowIfNeeded(for: model.mainWindowOpenRequestID)
             }
@@ -106,10 +132,15 @@ private struct MenuBarStatusLabel: View {
 
 private struct MenuBarStatusGlyph: View {
     let state: MenuBarStatusState
+    let recordingPulseIsFilled: Bool
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Image(systemName: state.systemImageName)
+            Image(
+                systemName: state.systemImageName(
+                    recordingPulseIsFilled: recordingPulseIsFilled
+                )
+            )
                 .font(.system(size: 15, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
                 .frame(width: 17, height: 17)
@@ -133,9 +164,6 @@ private struct MenuBarStatusBadgeGlyph: View {
         case .sharing:
             Circle()
                 .fill(Color.green)
-        case .recording:
-            Circle()
-                .strokeBorder(Color.red, lineWidth: 1.35)
         }
     }
 }

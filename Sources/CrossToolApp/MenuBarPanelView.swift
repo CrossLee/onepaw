@@ -3,6 +3,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum MenuBarPanelLayout {
+    enum RecordingControlPlacement: Equatable {
+        case top
+        case tools
+    }
+
     enum Action: Hashable {
         case copyShareLink
         case toggleServer
@@ -12,21 +17,65 @@ enum MenuBarPanelLayout {
 
     static let statusActions: [Action] = [.copyShareLink, .toggleServer]
     static let footerActions: [Action] = [.openMainWindow, .terminate]
+
+    static func recordingControlPlacement(
+        for state: ScreenRecordingFeatureState
+    ) -> RecordingControlPlacement {
+        switch state {
+        case .choosingSource, .starting, .recording, .stopping:
+            .top
+        case .idle, .completed, .cancelled, .failed:
+            .tools
+        }
+    }
+
+    static func stopRecordingShortcutHint(
+        dedicatedShortcut: String?,
+        activeSourceShortcut: String?
+    ) -> String? {
+        if let dedicatedShortcut {
+            return "快捷键 \(dedicatedShortcut)"
+        }
+        if let activeSourceShortcut {
+            return "再次按 \(activeSourceShortcut) 停止"
+        }
+        return nil
+    }
 }
 
 struct MenuBarPanelView: View {
     @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        MenuBarPanelContentView(
+            model: model,
+            recording: model.screenRecording
+        )
+    }
+}
+
+private struct MenuBarPanelContentView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var recording: ScreenRecordingFeatureModel
     @State private var showingImporter = false
     @State private var showingTextSheet = false
 
     private let screenshotColumns = Array(repeating: GridItem(.flexible()), count: 3)
     private let sharingColumns = Array(repeating: GridItem(.flexible()), count: 2)
 
+    private var recordingControlPlacement: MenuBarPanelLayout.RecordingControlPlacement {
+        MenuBarPanelLayout.recordingControlPlacement(for: recording.state)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
             Text(ApplicationBrand.displayName)
                 .font(.title3.weight(.semibold))
+
+            if recordingControlPlacement == .top {
+                recordingMenuSection
+            }
 
             HStack(spacing: 10) {
                 Circle()
@@ -62,17 +111,13 @@ struct MenuBarPanelView: View {
                 }
             }
 
-            Text("工具")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            if recordingControlPlacement == .tools {
+                Text("工具")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            RecordingMenuSection(
-                recording: model.screenRecording,
-                start: model.startRecording,
-                stop: model.stopRecording,
-                cancel: model.cancelRecording,
-                sampleColor: model.sampleAndCopyColor
-            )
+                recordingMenuSection
+            }
 
             Text("课堂共享")
                 .font(.caption.weight(.semibold))
@@ -133,6 +178,16 @@ struct MenuBarPanelView: View {
         model.presentMainWindow()
     }
 
+    private var recordingMenuSection: some View {
+        RecordingMenuSection(
+            recording: recording,
+            start: model.startRecording,
+            stop: model.stopRecording,
+            cancel: model.cancelRecording,
+            sampleColor: model.sampleAndCopyColor
+        )
+    }
+
     @ViewBuilder
     private func actionButton(for action: MenuBarPanelLayout.Action) -> some View {
         switch action {
@@ -185,6 +240,17 @@ private struct RecordingMenuSection: View {
 
     private let columns = Array(repeating: GridItem(.flexible()), count: 2)
 
+    private var stopShortcutHint: String? {
+        let dedicatedShortcut = appModel.configuredShortcutLabel(for: .stopRecording)
+        let activeSourceShortcut = recording.activeSource.flatMap { source in
+            appModel.configuredShortcutLabel(for: source.shortcutCommand)
+        }
+        return MenuBarPanelLayout.stopRecordingShortcutHint(
+            dedicatedShortcut: dedicatedShortcut,
+            activeSourceShortcut: activeSourceShortcut
+        )
+    }
+
     var body: some View {
         if recording.isRecording {
             Button(action: stop) {
@@ -196,11 +262,8 @@ private struct RecordingMenuSection: View {
                             .font(.subheadline.weight(.semibold))
                         Text(recording.elapsedText)
                             .font(.system(.caption, design: .monospaced))
-                        if let source = recording.activeSource,
-                           let shortcut = appModel.configuredShortcutLabel(
-                               for: source.shortcutCommand
-                           ) {
-                            Text("再次按 \(shortcut) 停止")
+                        if let stopShortcutHint {
+                            Text(stopShortcutHint)
                                 .font(.system(.caption2, design: .monospaced))
                                 .opacity(0.9)
                         }

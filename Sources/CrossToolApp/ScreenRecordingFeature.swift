@@ -55,7 +55,7 @@ extension GlobalShortcutCommand {
         case .recordCurrentDisplay: return .currentDisplay
         case .recordRegion: return .region
         case .recordWindow: return .window
-        case .screenshotRegion, .screenshotWindow, .screenshotScreen,
+        case .stopRecording, .screenshotRegion, .screenshotWindow, .screenshotScreen,
              .screenshotDelayed, .screenshotFramed, .screenshotMultiWindow,
              .screenshotScrolling, .pickColor, .translateText,
              .formatClipboardJSON, .showMainWindow:
@@ -75,8 +75,63 @@ enum ScreenRecordingFeatureState: Equatable {
     case failed(String)
 }
 
+enum RecordingCompletionDirectoryOpenResult: Equatable {
+    case skipped
+    case opened
+    case failed
+}
+
+/// Keeps the Finder side effect tied to one successful recording operation.
+///
+/// `ScreenRecordingService.stop()` publishes `.completed` before it returns
+/// the completed URL, so the feature can observe the same completion twice.
+/// Recording the attempt before invoking Finder makes the side effect
+/// single-shot even when Finder reports failure or a duplicate callback is
+/// delivered. Starting another operation resets both suppression and the
+/// attempt marker.
+struct RecordingCompletionDirectoryOpenGate {
+    private var operationID: UUID?
+    private var suppressesAutomaticOpen = false
+    private var hasAttemptedAutomaticOpen = false
+
+    mutating func beginOperation(_ operationID: UUID) {
+        self.operationID = operationID
+        suppressesAutomaticOpen = false
+        hasAttemptedAutomaticOpen = false
+    }
+
+    mutating func suppressAutomaticOpen(for operationID: UUID?) {
+        guard self.operationID == operationID, operationID != nil else { return }
+        suppressesAutomaticOpen = true
+    }
+
+    mutating func resumeAutomaticOpen(for operationID: UUID?) {
+        guard self.operationID == operationID, operationID != nil else { return }
+        suppressesAutomaticOpen = false
+    }
+
+    mutating func openAfterSuccessfulCompletion(
+        operationID: UUID,
+        recordingsDirectory: URL,
+        using opener: (URL) -> Bool
+    ) -> RecordingCompletionDirectoryOpenResult {
+        guard self.operationID == operationID,
+              !suppressesAutomaticOpen,
+              !hasAttemptedAutomaticOpen else {
+            return .skipped
+        }
+
+        // Mark the attempt first. A failed Finder request must not make a
+        // duplicate completion callback try again and unexpectedly activate it.
+        hasAttemptedAutomaticOpen = true
+        return opener(recordingsDirectory) ? .opened : .failed
+    }
+}
+
 @MainActor
 final class ScreenRecordingFeatureModel: ObservableObject {
+    typealias RecordingDirectoryOpenHandler = (URL) -> Bool
+
     static let classroomShareLimitBytes = Int64(SharedContentStore.maximumUploadBytes)
 
     @Published var capturesSystemAudio = true
@@ -93,21 +148,34 @@ final class ScreenRecordingFeatureModel: ObservableObject {
     let draftsDirectory: URL
 
     private let service: ScreenRecordingService
+    private let recordingDirectoryOpenHandler: RecordingDirectoryOpenHandler
     private var activeDraftURL: URL?
     private var activeFinalURL: URL?
     private var startTask: Task<Void, Never>?
+    private var stopTask: Task<Bool, Never>?
     private var elapsedTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     private var isFinalizing = false
     private var activeOperationID: UUID?
     private var activeRegionHiddenWindows: TemporarilyHiddenAppWindows?
     private var cancellationInProgress = false
+    private var completionDirectoryOpenGate = RecordingCompletionDirectoryOpenGate()
 
     convenience init() {
-        self.init(service: ScreenRecordingService())
+        self.init(
+            service: ScreenRecordingService(),
+            recordingDirectoryOpenHandler: { directory in
+                NSWorkspace.shared.open(directory)
+            }
+        )
     }
 
-    init(service: ScreenRecordingService) {
+    init(
+        service: ScreenRecordingService,
+        recordingDirectoryOpenHandler: @escaping RecordingDirectoryOpenHandler = { directory in
+            NSWorkspace.shared.open(directory)
+        }
+    ) {
         let root = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -121,6 +189,7 @@ final class ScreenRecordingFeatureModel: ObservableObject {
         )
 
         self.service = service
+        self.recordingDirectoryOpenHandler = recordingDirectoryOpenHandler
         self.recordingsDirectory = root
         self.draftsDirectory = drafts
         service.stateDidChange = { [weak self] newState in
@@ -163,7 +232,10 @@ final class ScreenRecordingFeatureModel: ObservableObject {
     }
 
     func start(_ source: ScreenRecordingSource) {
-        guard !isBusy, startTask == nil, activeOperationID == nil else { return }
+        guard !isBusy,
+              startTask == nil,
+              stopTask == nil,
+              activeOperationID == nil else { return }
         latestRecordingDeletionError = nil
 
         do {
@@ -177,6 +249,7 @@ final class ScreenRecordingFeatureModel: ObservableObject {
 
         let operationID = UUID()
         activeOperationID = operationID
+        completionDirectoryOpenGate.beginOperation(operationID)
         activeSource = source
         switch source {
         case .currentDisplay:
@@ -285,10 +358,7 @@ final class ScreenRecordingFeatureModel: ObservableObject {
     }
 
     func stop() {
-        guard state == .recording else { return }
-        Task { @MainActor [weak self] in
-            _ = await self?.stopAndFinalize()
-        }
+        _ = beginStopIfNeeded()
     }
 
     func cancel() {
@@ -350,27 +420,81 @@ final class ScreenRecordingFeatureModel: ObservableObject {
 
     /// Used by the app delegate before replying to a Cmd-Q request.
     func prepareForApplicationTermination() async -> Bool {
+        // Completing a recording is part of safe termination, but activating
+        // Finder while the app is quitting is surprising and can delay quit.
+        let operationID = activeOperationID
+        completionDirectoryOpenGate.suppressAutomaticOpen(for: operationID)
+        if stopTask != nil {
+            return await finishTerminationWait(for: operationID)
+        }
+
         switch state {
         case .choosingSource, .starting:
             await cancelCurrentOperation()
             return true
         case .recording:
-            return await stopAndFinalize()
+            guard beginStopIfNeeded() != nil else { return false }
+            return await finishTerminationWait(for: operationID)
         case .stopping:
-            for _ in 0..<300 {
-                if case .stopping = state {
-                    try? await Task.sleep(for: .milliseconds(100))
-                } else {
-                    break
-                }
-            }
-            if case .completed = state { return true }
-            return !isBusy
+            return await finishTerminationWait(for: operationID)
         case .idle, .completed, .cancelled:
             return true
         case .failed:
             return false
         }
+    }
+
+    private func finishTerminationWait(for operationID: UUID?) async -> Bool {
+        let canTerminate = await waitForRecordingFinalizationDuringTermination()
+        if !canTerminate {
+            // AppKit will cancel this quit request. If the system finishes the
+            // recording later, restore the normal post-save Finder behavior.
+            completionDirectoryOpenGate.resumeAutomaticOpen(for: operationID)
+        }
+        return canTerminate
+    }
+
+    private func waitForRecordingFinalizationDuringTermination() async -> Bool {
+        for _ in 0..<300 {
+            if stopTask == nil {
+                switch state {
+                case .idle, .completed, .cancelled:
+                    return true
+                case .failed:
+                    return false
+                case .choosingSource, .starting, .recording, .stopping:
+                    break
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        // Re-check after the final sleep so a save that completes on the
+        // timeout boundary is not incorrectly treated as still running.
+        switch state {
+        case .idle, .completed, .cancelled:
+            return true
+        case .failed:
+            return false
+        case .choosingSource, .starting, .recording, .stopping:
+            break
+        }
+
+        statusMessage = "录屏仍在保存，请稍后再退出"
+        return false
+    }
+
+    private func beginStopIfNeeded() -> Task<Bool, Never>? {
+        if let stopTask { return stopTask }
+        guard state == .recording else { return nil }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            defer { self.stopTask = nil }
+            return await self.stopAndFinalize()
+        }
+        stopTask = task
+        return task
     }
 
     private func stopAndFinalize() async -> Bool {
@@ -472,6 +596,7 @@ final class ScreenRecordingFeatureModel: ObservableObject {
         guard !isFinalizing,
               let expectedDraftURL = activeDraftURL,
               let finalURL = activeFinalURL,
+              let operationID = activeOperationID,
               expectedDraftURL.standardizedFileURL == draftURL.standardizedFileURL else {
             return false
         }
@@ -493,7 +618,19 @@ final class ScreenRecordingFeatureModel: ObservableObject {
             startTask = nil
             restoreRegionWindows()
             state = .completed(finalURL)
-            statusMessage = "录屏已保存到本地，不会自动加入课堂共享"
+            let openResult = completionDirectoryOpenGate.openAfterSuccessfulCompletion(
+                operationID: operationID,
+                recordingsDirectory: recordingsDirectory,
+                using: recordingDirectoryOpenHandler
+            )
+            switch openResult {
+            case .opened:
+                statusMessage = "录屏已保存，已打开录屏文件夹；不会自动加入课堂共享"
+            case .failed:
+                statusMessage = "录屏已保存，但无法自动打开录屏文件夹"
+            case .skipped:
+                statusMessage = "录屏已保存到本地，不会自动加入课堂共享"
+            }
             return true
         } catch {
             // A finalized MOV is valuable even if the final rename failed.
@@ -842,10 +979,7 @@ struct ScreenRecordingPage: View {
                     HStack(spacing: 7) {
                         Image(systemName: "stop.fill")
                         Text("停止录屏")
-                        if let source = model.activeSource,
-                           let shortcut = appModel.configuredShortcutLabel(
-                               for: source.shortcutCommand
-                           ) {
+                        if let shortcut = activeStopShortcutLabel {
                             Text(shortcut)
                                 .font(.system(.caption, design: .monospaced, weight: .semibold))
                         }
@@ -951,5 +1085,13 @@ struct ScreenRecordingPage: View {
         case .stopping: return "正在保存录屏"
         case .idle, .completed, .cancelled, .failed: return "录屏"
         }
+    }
+
+    private var activeStopShortcutLabel: String? {
+        if let stopShortcut = appModel.configuredShortcutLabel(for: .stopRecording) {
+            return stopShortcut
+        }
+        guard let source = model.activeSource else { return nil }
+        return appModel.configuredShortcutLabel(for: source.shortcutCommand)
     }
 }

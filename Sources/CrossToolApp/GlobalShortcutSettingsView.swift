@@ -26,6 +26,7 @@ struct GlobalShortcutSettingsSection: View {
         .recordCurrentDisplay,
         .recordRegion,
         .recordWindow,
+        .stopRecording,
     ]
     private let colorCommands: [GlobalShortcutCommand] = [
         .pickColor,

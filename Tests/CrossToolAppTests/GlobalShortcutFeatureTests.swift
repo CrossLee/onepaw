@@ -1,22 +1,29 @@
 import CrossToolCore
+import Foundation
 import Testing
 @testable import CrossToolApp
 
 @MainActor
 @Suite("Global shortcut feature metadata")
 struct GlobalShortcutFeatureTests {
-    @Test("Clipboard JSON and main-window shortcuts are optional and descriptive")
+    @Test("New tool shortcuts are optional and descriptive")
     func optionalCommandMetadata() {
+        #expect(GlobalShortcutCommand.defaultGlobalShortcuts[.stopRecording] == nil)
         #expect(GlobalShortcutCommand.defaultGlobalShortcuts[.formatClipboardJSON] == nil)
         #expect(GlobalShortcutCommand.defaultGlobalShortcuts[.showMainWindow] == nil)
+        #expect(!GlobalShortcutCommand.requiredGlobalShortcutCommands.contains(.stopRecording))
         #expect(!GlobalShortcutCommand.requiredGlobalShortcutCommands.contains(.formatClipboardJSON))
         #expect(!GlobalShortcutCommand.requiredGlobalShortcutCommands.contains(.showMainWindow))
+        #expect(GlobalShortcutCommand.stopRecording.title == "停止录屏")
         #expect(GlobalShortcutCommand.formatClipboardJSON.title == "格式化剪贴板 JSON")
         #expect(GlobalShortcutCommand.showMainWindow.title == "显示一爪主界面")
+        #expect(GlobalShortcutCommand.stopRecording.systemImage == "stop.circle.fill")
         #expect(GlobalShortcutCommand.formatClipboardJSON.systemImage == "curlybraces.square")
         #expect(GlobalShortcutCommand.showMainWindow.systemImage == "macwindow")
+        #expect(GlobalShortcutCommand.stopRecording.screenshotMode == nil)
         #expect(GlobalShortcutCommand.formatClipboardJSON.screenshotMode == nil)
         #expect(GlobalShortcutCommand.showMainWindow.screenshotMode == nil)
+        #expect(GlobalShortcutCommand.stopRecording.recordingSource == nil)
         #expect(GlobalShortcutCommand.formatClipboardJSON.recordingSource == nil)
         #expect(GlobalShortcutCommand.showMainWindow.recordingSource == nil)
     }
@@ -37,5 +44,43 @@ struct GlobalShortcutFeatureTests {
             guard case .duplicateBinding(let commands) = issue else { return false }
             return commands == [.formatClipboardJSON, .showMainWindow]
         })
+    }
+
+    @Test("Stop-recording shortcut participates in duplicate validation")
+    func stopRecordingDuplicateValidation() {
+        let duplicate = GlobalShortcut(
+            keyCode: 1,
+            modifiers: [.control, .option]
+        )
+        var shortcuts = GlobalShortcutCommand.defaultGlobalShortcuts
+        shortcuts[.recordWindow] = duplicate
+        shortcuts[.stopRecording] = duplicate
+
+        let issues = GlobalHotKeyManager.validate(shortcuts: shortcuts)
+
+        #expect(issues.contains { issue in
+            guard case .duplicateBinding(let commands) = issue else { return false }
+            return commands == [.recordWindow, .stopRecording]
+        })
+    }
+
+    @Test("Stop-recording shortcut resolves every recording state")
+    func stopRecordingStateDecisions() {
+        let completedURL = URL(fileURLWithPath: "/tmp/onepaw-completed.mov")
+
+        #expect(RecordingStopShortcutDecision(state: .recording) == .stopAndSave)
+        #expect(RecordingStopShortcutDecision(state: .choosingSource) == .cancelPendingStart)
+        #expect(RecordingStopShortcutDecision(state: .starting) == .cancelPendingStart)
+        #expect(RecordingStopShortcutDecision(state: .stopping) == .waitForSave)
+        #expect(RecordingStopShortcutDecision(state: .idle) == .noActiveRecording)
+        #expect(
+            RecordingStopShortcutDecision(state: .completed(completedURL))
+                == .noActiveRecording
+        )
+        #expect(RecordingStopShortcutDecision(state: .cancelled) == .noActiveRecording)
+        #expect(
+            RecordingStopShortcutDecision(state: .failed("test"))
+                == .noActiveRecording
+        )
     }
 }

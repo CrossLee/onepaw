@@ -3,22 +3,28 @@ import Testing
 
 @Suite("Menu bar status icon")
 struct MenuBarStatusIconTests {
-    @Test("The cat remains the menu bar symbol in every state")
-    func brandSymbolDoesNotDisappearWhenStateChanges() {
-        for state in [
-            MenuBarStatusState.idle,
-            .sharing,
-            .recording,
-        ] {
-            #expect(state.systemImageName == "cat.fill")
-        }
+    @Test("Recording replaces the cat with a low-frequency recording pulse")
+    func recordingUsesDistinctPulseFrames() {
+        #expect(MenuBarStatusState.idle.systemImageName == "cat.fill")
+        #expect(MenuBarStatusState.sharing.systemImageName == "cat.fill")
+        #expect(MenuBarStatusState.recording.systemImageName == "record.circle.fill")
+        #expect(
+            MenuBarStatusState.recording.systemImageName(
+                recordingPulseIsFilled: false
+            ) == "record.circle"
+        )
+        #expect(
+            MenuBarStatusState.idle.systemImageName(
+                recordingPulseIsFilled: false
+            ) == "cat.fill"
+        )
     }
 
-    @Test("Sharing and recording add distinct status badges")
+    @Test("Only sharing needs a badge because recording owns the main glyph")
     func statusBadges() {
         #expect(MenuBarStatusState.idle.badge == nil)
         #expect(MenuBarStatusState.sharing.badge == .sharing)
-        #expect(MenuBarStatusState.recording.badge == .recording)
+        #expect(MenuBarStatusState.recording.badge == nil)
     }
 
     @Test("Recording takes precedence over sharing")
@@ -27,6 +33,10 @@ struct MenuBarStatusIconTests {
         #expect(MenuBarStatusState(isRecording: false, isServerRunning: true) == .sharing)
         #expect(MenuBarStatusState(isRecording: true, isServerRunning: false) == .recording)
         #expect(MenuBarStatusState(isRecording: true, isServerRunning: true) == .recording)
+        #expect(
+            MenuBarStatusState(isRecording: false, isServerRunning: false).systemImageName
+                == "cat.fill"
+        )
     }
 
     @Test("Every status has a clear accessibility label")
